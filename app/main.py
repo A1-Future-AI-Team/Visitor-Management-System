@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from .database import engine, Base
 from .api import visitors
 
@@ -6,6 +7,14 @@ from .api import visitors
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Visitor Management System")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(visitors.router, tags=["visitors"])
 
