@@ -43,3 +43,19 @@ class CheckInResponse(BaseModel):
     confidence_score: float
     message: str
     visitor_name: Optional[str] = None
+
+class OTPSend(BaseModel):
+    phone: str
+
+class OTPVerify(BaseModel):
+    phone: str
+    otp: str
+
+class MergeRequest(BaseModel):
+    primary_visitor_id: int
+    secondary_visitor_id: int
+
+class DuplicateProfile(BaseModel):
+    visitor1: VisitorResponse
+    visitor2: VisitorResponse
+    reason: str

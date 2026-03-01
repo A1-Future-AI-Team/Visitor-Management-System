@@ -57,17 +57,74 @@ export function VisitorRegistration() {
     setCameraOpen(false)
   }, [])
 
-  const handleSendOtp = () => {
-    if (mobile.length >= 10) {
-      setOtpSent(true)
-      // TODO: call backend to send OTP
+  const handleSendOtp = async () => {
+    if (mobile.length === 10) {
+      try {
+        const response = await fetch("http://localhost:8000/otp/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone: mobile }),
+        })
+        const data = await response.json()
+        if (data.status === "success") {
+          setOtpSent(true)
+          alert("MOCK OTP sent! Check backend console for the 4-digit code.")
+        }
+      } catch (error) {
+        console.error("Error sending OTP:", error)
+        alert("Failed to send OTP. Is the backend running?")
+      }
     }
   }
 
-  const handleSubmit = () => {
-    const payload = { name, mobile, otp, photo }
-    console.log("Submit payload:", payload)
-    // TODO: POST to backend
+  const handleSubmit = async () => {
+    if (!photo) return
+    
+    // Convert dataUrl to Blob
+    const response_photo = await fetch(photo)
+    const blob = await response_photo.blob()
+    
+    const formData = new FormData()
+    formData.append("name", name)
+    formData.append("phone", mobile)
+    formData.append("image", blob, "visitor_photo.jpg")
+    // Note: OTP verification happens first in a real app, 
+    // but here we just proceed if OTP is entered.
+    
+    try {
+      // First verify OTP
+      const otpResponse = await fetch("http://localhost:8000/otp/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: mobile, otp: otp }),
+      })
+      
+      if (!otpResponse.ok) {
+        alert("Invalid OTP")
+        return
+      }
+
+      const regResponse = await fetch("http://localhost:8000/visitors/register", {
+        method: "POST",
+        body: formData,
+      })
+      
+      const data = await regResponse.json()
+      if (regResponse.ok) {
+        alert("Registration Successful! Visitor ID: " + data.id)
+        // Reset form
+        setName("")
+        setMobile("")
+        setOtp("")
+        setOtpSent(false)
+        setPhoto(null)
+      } else {
+        alert("Registration failed: " + data.detail)
+      }
+    } catch (error) {
+      console.error("Error during registration:", error)
+      alert("An error occurred. Check console for details.")
+    }
   }
 
   return (
