@@ -6,3 +6,11 @@ python-multipart
 numpy
 qrcode
 pillow
+opencv-python-headless
+onnxruntime
+insightface
+requests
+fastapi-mail
+itsdangerous
+rapidfuzz
+email-validator

@@ -8,5 +8,16 @@ instrumentation-client.ts
 # Common ignores
 node_modules/
 .next/
+.env
 .env*.local
 .DS_Store
+tmp/
+
+# other files
+__pycache__/
+.venv/
+*.log
+
+# local model cache
+.cache/
+*.db

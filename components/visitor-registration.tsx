@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -10,120 +10,200 @@ import {
   InputOTPGroup,
   InputOTPSlot,
 } from "@/components/ui/input-otp"
-import { Camera, X, RotateCcw } from "lucide-react"
+import { Camera, CheckCircle2, RotateCcw, X } from "lucide-react"
+
+const API_BASE_URL = "http://localhost:8000"
 
 export function VisitorRegistration() {
   const [name, setName] = useState("")
-  const [mobile, setMobile] = useState("")
+  const [email, setEmail] = useState("")
+  const [phone, setPhone] = useState("")
   const [otp, setOtp] = useState("")
   const [otpSent, setOtpSent] = useState(false)
+  const [otpVerified, setOtpVerified] = useState(false)
+  const [verificationToken, setVerificationToken] = useState<string | null>(null)
   const [cameraOpen, setCameraOpen] = useState(false)
+  const [videoReady, setVideoReady] = useState(false)
   const [photo, setPhoto] = useState<string | null>(null)
+  const [cameraMessage, setCameraMessage] = useState("")
+  const [sendingOtp, setSendingOtp] = useState(false)
+  const [verifyingOtp, setVerifyingOtp] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
 
+  const resetOtpState = useCallback(() => {
+    setOtp("")
+    setOtpSent(false)
+    setOtpVerified(false)
+    setVerificationToken(null)
+  }, [])
+
+  const stopCamera = useCallback(() => {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+
+    if (videoRef.current) {
+      videoRef.current.pause()
+      videoRef.current.srcObject = null
+    }
+
+    setCameraOpen(false)
+    setVideoReady(false)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      stopCamera()
+    }
+  }, [stopCamera])
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || !cameraOpen || !streamRef.current) {
+      return
+    }
+
+    video.srcObject = streamRef.current
+    void video.play().catch(() => {
+      setCameraMessage("Camera is ready but could not autoplay. Wait for the preview, then capture.")
+    })
+  }, [cameraOpen])
+
   const openCamera = useCallback(async () => {
+    stopCamera()
+    setPhoto(null)
+    setCameraMessage("Starting live preview...")
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
+        video: {
+          facingMode: "user",
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
       })
       streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-      }
       setCameraOpen(true)
-      setPhoto(null)
     } catch {
       alert("Unable to access camera. Please allow camera permissions.")
     }
-  }, [])
+  }, [stopCamera])
 
   const capturePhoto = useCallback(() => {
-    if (!videoRef.current) return
+    if (!videoRef.current || videoRef.current.videoWidth === 0 || videoRef.current.videoHeight === 0) {
+      alert("Camera preview is not ready yet. Wait for the live image, then capture.")
+      return
+    }
+
     const canvas = document.createElement("canvas")
     canvas.width = videoRef.current.videoWidth
     canvas.height = videoRef.current.videoHeight
     const ctx = canvas.getContext("2d")
-    if (ctx) {
-      ctx.drawImage(videoRef.current, 0, 0)
-      setPhoto(canvas.toDataURL("image/jpeg", 0.8))
+    if (!ctx) {
+      alert("Unable to capture a photo from the live preview.")
+      return
     }
-    streamRef.current?.getTracks().forEach((t) => t.stop())
-    setCameraOpen(false)
-  }, [])
 
-  const closeCamera = useCallback(() => {
-    streamRef.current?.getTracks().forEach((t) => t.stop())
-    setCameraOpen(false)
-  }, [])
+    ctx.drawImage(videoRef.current, 0, 0)
+    setPhoto(canvas.toDataURL("image/jpeg", 0.9))
+    stopCamera()
+  }, [stopCamera])
 
   const handleSendOtp = async () => {
-    if (mobile.length === 10) {
-      try {
-        const response = await fetch("http://localhost:8000/otp/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phone: mobile }),
-        })
-        const data = await response.json()
-        if (data.status === "success") {
-          setOtpSent(true)
-          alert("MOCK OTP sent! Check backend console for the 4-digit code.")
-        }
-      } catch (error) {
-        console.error("Error sending OTP:", error)
-        alert("Failed to send OTP. Is the backend running?")
+    if (!email.trim()) {
+      return
+    }
+
+    setSendingOtp(true)
+    resetOtpState()
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/otp/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(data?.detail ?? "Failed to send OTP.")
       }
+
+      setOtpSent(true)
+      alert("Verification code sent to your email inbox.")
+    } catch (error) {
+      console.error("Error sending OTP:", error)
+      alert(error instanceof Error ? error.message : "Failed to send OTP. Is the backend running?")
+    } finally {
+      setSendingOtp(false)
+    }
+  }
+
+  const handleVerifyOtp = async () => {
+    if (!otpSent || otp.length !== 6) {
+      return
+    }
+
+    setVerifyingOtp(true)
+    try {
+      const response = await fetch(`${API_BASE_URL}/otp/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), otp }),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(data?.detail ?? "OTP verification failed.")
+      }
+
+      setOtpVerified(true)
+      setVerificationToken(data.verification_token)
+      alert("Email verified successfully.")
+    } catch (error) {
+      console.error("Error verifying OTP:", error)
+      alert(error instanceof Error ? error.message : "OTP verification failed.")
+      setOtpVerified(false)
+      setVerificationToken(null)
+    } finally {
+      setVerifyingOtp(false)
     }
   }
 
   const handleSubmit = async () => {
-    if (!photo) return
-    
-    // Convert dataUrl to Blob
-    const response_photo = await fetch(photo)
-    const blob = await response_photo.blob()
-    
-    const formData = new FormData()
-    formData.append("name", name)
-    formData.append("phone", mobile)
-    formData.append("image", blob, "visitor_photo.jpg")
-    // Note: OTP verification happens first in a real app, 
-    // but here we just proceed if OTP is entered.
-    
-    try {
-      // First verify OTP
-      const otpResponse = await fetch("http://localhost:8000/otp/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: mobile, otp: otp }),
-      })
-      
-      if (!otpResponse.ok) {
-        alert("Invalid OTP")
-        return
-      }
+    if (!photo || !verificationToken) {
+      return
+    }
 
-      const regResponse = await fetch("http://localhost:8000/visitors/register", {
+    const responsePhoto = await fetch(photo)
+    const blob = await responsePhoto.blob()
+
+    const formData = new FormData()
+    formData.append("name", name.trim())
+    formData.append("email", email.trim().toLowerCase())
+    formData.append("phone", phone.trim())
+    formData.append("verification_token", verificationToken)
+    formData.append("image", blob, "visitor_photo.jpg")
+
+    try {
+      const regResponse = await fetch(`${API_BASE_URL}/visitors/register`, {
         method: "POST",
         body: formData,
       })
-      
-      const data = await regResponse.json()
+
+      const data = await regResponse.json().catch(() => null)
       if (regResponse.ok) {
-        alert("Registration Successful! Visitor ID: " + data.id)
-        // Reset form
+        alert(`Registration successful. Visitor ID: ${data.id}. Check your email for the QR code.`)
         setName("")
-        setMobile("")
-        setOtp("")
-        setOtpSent(false)
+        setEmail("")
+        setPhone("")
         setPhoto(null)
+        setCameraMessage("")
+        resetOtpState()
       } else {
-        alert("Registration failed: " + data.detail)
+        alert(`Registration failed: ${data?.detail ?? "Unknown error"}`)
       }
     } catch (error) {
       console.error("Error during registration:", error)
-      alert("An error occurred. Check console for details.")
+      alert("An error occurred during registration. Check the console for details.")
     }
   }
 
@@ -134,112 +214,146 @@ export function VisitorRegistration() {
           Visitor Registration
         </CardTitle>
       </CardHeader>
-      <CardContent className="px-0 space-y-5">
-        {/* Name */}
+      <CardContent className="space-y-5 px-0">
         <div className="space-y-2">
           <Label htmlFor="visitor-name">Full Name</Label>
           <Input
             id="visitor-name"
             placeholder="Enter your name"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(event) => setName(event.target.value)}
           />
         </div>
 
-        {/* Mobile */}
         <div className="space-y-2">
-          <Label htmlFor="visitor-mobile">Mobile Number</Label>
+          <Label htmlFor="visitor-email">Email Address</Label>
           <div className="flex gap-2">
             <Input
-              id="visitor-mobile"
-              type="tel"
-              placeholder="Enter mobile number"
-              value={mobile}
-              onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
+              id="visitor-email"
+              type="email"
+              placeholder="Enter your email"
+              value={email}
+              onChange={(event) => {
+                setEmail(event.target.value)
+                resetOtpState()
+              }}
               className="flex-1"
             />
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="shrink-0 h-10 px-4 bg-transparent"
+              className="h-10 shrink-0 bg-transparent px-4"
               onClick={handleSendOtp}
-              disabled={mobile.length < 10}
+              disabled={!email.trim() || sendingOtp}
             >
               {otpSent ? "Resend" : "Send OTP"}
             </Button>
           </div>
         </div>
 
-        {/* OTP */}
+        <div className="space-y-2">
+          <Label htmlFor="visitor-phone">Mobile Number (Optional)</Label>
+          <Input
+            id="visitor-phone"
+            type="tel"
+            placeholder="Enter mobile number"
+            value={phone}
+            onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 15))}
+          />
+          <p className="text-xs text-muted-foreground">Stored for contact only. Email is the verified identifier in this POC.</p>
+        </div>
+
         {otpSent && (
           <div className="space-y-2">
-            <Label>Enter OTP</Label>
-            <InputOTP maxLength={6} value={otp} onChange={setOtp}>
-              <InputOTPGroup>
-                <InputOTPSlot index={0} />
-                <InputOTPSlot index={1} />
-                <InputOTPSlot index={2} />
-                <InputOTPSlot index={3} />
-                <InputOTPSlot index={4} />
-                <InputOTPSlot index={5} />
-              </InputOTPGroup>
-            </InputOTP>
+            <div className="flex items-center justify-between">
+              <Label>Enter Email OTP</Label>
+              {otpVerified && (
+                <span className="flex items-center gap-1 text-xs text-emerald-600">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Verified
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <InputOTP maxLength={6} value={otp} onChange={setOtp}>
+                <InputOTPGroup>
+                  <InputOTPSlot index={0} />
+                  <InputOTPSlot index={1} />
+                  <InputOTPSlot index={2} />
+                  <InputOTPSlot index={3} />
+                  <InputOTPSlot index={4} />
+                  <InputOTPSlot index={5} />
+                </InputOTPGroup>
+              </InputOTP>
+              <Button type="button" variant="secondary" onClick={handleVerifyOtp} disabled={otp.length !== 6 || otpVerified || verifyingOtp}>
+                Verify
+              </Button>
+            </div>
           </div>
         )}
 
-        {/* Photo Capture */}
         <div className="space-y-2">
           <Label>Photo</Label>
           {!cameraOpen && !photo && (
             <Button
               type="button"
               variant="outline"
-              className="w-full h-24 flex flex-col gap-2 border-dashed bg-transparent"
-              onClick={openCamera}
+              className="h-24 w-full flex-col gap-2 border-dashed bg-transparent"
+              onClick={() => void openCamera()}
             >
               <Camera className="h-6 w-6 text-muted-foreground" />
               <span className="text-sm text-muted-foreground">
-                Tap to open camera
+                Tap to open live camera preview
               </span>
             </Button>
           )}
 
           {cameraOpen && (
-            <div className="relative rounded-md overflow-hidden bg-muted">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full aspect-[4/3] object-cover"
-              />
-              <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-3">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={closeCamera}
-                  className="rounded-full h-10 w-10 p-0"
-                  aria-label="Close camera"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={capturePhoto}
-                  className="rounded-full h-12 w-12 p-0"
-                  aria-label="Capture photo"
-                >
-                  <Camera className="h-5 w-5" />
-                </Button>
+            <div className="space-y-2">
+              {cameraMessage && (
+                <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">{cameraMessage}</p>
+              )}
+              <div className="relative overflow-hidden rounded-md bg-muted">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  onLoadedMetadata={() => {
+                    setVideoReady(true)
+                    setCameraMessage("Live preview ready. Keep your face centered and tap capture.")
+                  }}
+                  className="w-full aspect-[4/3] object-cover scale-x-[-1]"
+                />
+                <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-3">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={stopCamera}
+                    className="h-10 w-10 rounded-full p-0"
+                    aria-label="Close camera"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={capturePhoto}
+                    className="h-12 w-12 rounded-full p-0"
+                    aria-label="Capture photo"
+                    disabled={!videoReady}
+                  >
+                    <Camera className="h-5 w-5" />
+                  </Button>
+                </div>
               </div>
             </div>
           )}
 
           {photo && (
-            <div className="relative rounded-md overflow-hidden">
+            <div className="relative overflow-hidden rounded-md">
               <img
-                src={photo || "/placeholder.svg"}
+                src={photo}
                 alt="Captured visitor photo"
                 className="w-full aspect-[4/3] object-cover"
               />
@@ -247,7 +361,7 @@ export function VisitorRegistration() {
                 size="sm"
                 variant="secondary"
                 className="absolute bottom-2 right-2 gap-1"
-                onClick={openCamera}
+                onClick={() => void openCamera()}
               >
                 <RotateCcw className="h-3 w-3" />
                 Retake
@@ -256,11 +370,10 @@ export function VisitorRegistration() {
           )}
         </div>
 
-        {/* Submit */}
         <Button
           className="w-full"
           onClick={handleSubmit}
-          disabled={!name || !mobile || !otp || !photo}
+          disabled={!name.trim() || !email.trim() || !otpVerified || !verificationToken || !photo}
         >
           Register
         </Button>

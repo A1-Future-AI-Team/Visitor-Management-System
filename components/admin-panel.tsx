@@ -1,30 +1,147 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import jsQR from "jsqr"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { ScanLine, Camera, X, RotateCcw, ShieldCheck, ShieldX } from "lucide-react"
+import { Camera, Mail, RotateCcw, ScanLine, ShieldCheck, ShieldX, X } from "lucide-react"
 
 type VerificationStatus = "idle" | "pending" | "allowed" | "denied"
+type AdminMode = "menu" | "qr" | "face" | "visitors" | "logs" | "duplicates"
+
+type VisitorRecord = {
+  id: number
+  name: string
+  phone: string | null
+  email: string | null
+  created_at: string
+}
+
+type VisitLogRecord = {
+  id: number
+  visitor_id: number
+  visitor_name: string
+  timestamp: string
+  decision: "ALLOW" | "DENY"
+  confidence_score: number
+}
+
+type DuplicateRecord = {
+  visitor1: VisitorRecord
+  visitor2: VisitorRecord
+  reasons: string[]
+  scores: {
+    name_score: number
+    phone_score: number
+    face_score?: number | null
+    combined_score: number
+  }
+}
+
+type VerificationResult = {
+  decision: "ALLOW" | "DENY"
+  confidence_score: number
+  message: string
+  visitor_id?: number | null
+  visitor_name?: string | null
+}
+
+const API_BASE_URL = "http://localhost:8000"
 
 export function AdminPanel() {
-  const [mode, setMode] = useState<"menu" | "qr" | "face" | "visitors" | "logs" | "duplicates">("menu")
+  const [mode, setMode] = useState<AdminMode>("menu")
   const [status, setStatus] = useState<VerificationStatus>("idle")
   const [cameraActive, setCameraActive] = useState(false)
+  const [videoReady, setVideoReady] = useState(false)
   const [facePhoto, setFacePhoto] = useState<string | null>(null)
+  const [statusMessage, setStatusMessage] = useState<string>("")
+  const [result, setResult] = useState<VerificationResult | null>(null)
+  const [selectedVisitor, setSelectedVisitor] = useState<VisitorRecord | null>(null)
 
-  const [visitors, setVisitors] = useState<any[]>([])
-  const [logs, setLogs] = useState<any[]>([])
-  const [duplicates, setDuplicates] = useState<any[]>([])
+  const [visitors, setVisitors] = useState<VisitorRecord[]>([])
+  const [logs, setLogs] = useState<VisitLogRecord[]>([])
+  const [duplicates, setDuplicates] = useState<DuplicateRecord[]>([])
   const [loading, setLoading] = useState(false)
+  const [resendingVisitorId, setResendingVisitorId] = useState<number | null>(null)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const scanCanvasRef = useRef<HTMLCanvasElement>(null)
+  const scanFrameRef = useRef<number | null>(null)
+  const scanLockRef = useRef(false)
+
+  const stopCamera = useCallback(() => {
+    if (scanFrameRef.current !== null) {
+      cancelAnimationFrame(scanFrameRef.current)
+      scanFrameRef.current = null
+    }
+
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+
+    if (videoRef.current) {
+      videoRef.current.pause()
+      videoRef.current.srcObject = null
+    }
+
+    setCameraActive(false)
+    setVideoReady(false)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      stopCamera()
+    }
+  }, [stopCamera])
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || !cameraActive || !streamRef.current) {
+      return
+    }
+
+    video.srcObject = streamRef.current
+    void video.play().catch(() => {
+      setStatusMessage("Camera stream is available but could not autoplay. Tap capture after the preview appears.")
+    })
+  }, [cameraActive, mode])
+
+  const startCamera = useCallback(async (facingMode: "environment" | "user") => {
+    stopCamera()
+    setFacePhoto(null)
+    setVideoReady(false)
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode,
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      })
+      streamRef.current = stream
+      setCameraActive(true)
+    } catch {
+      setStatus("denied")
+      setStatusMessage("Unable to access camera. Please allow camera permissions.")
+    }
+  }, [stopCamera])
+
+  const fetchVisitor = useCallback(async (visitorId: number) => {
+    const response = await fetch(`${API_BASE_URL}/visitors/${visitorId}`)
+    const data = await response.json().catch(() => null)
+
+    if (!response.ok) {
+      throw new Error(data?.detail ?? "Unable to load visitor details.")
+    }
+
+    return data as VisitorRecord
+  }, [])
 
   const fetchVisitors = async () => {
     setLoading(true)
     try {
-      const resp = await fetch("http://localhost:8000/admin/visitors")
+      const resp = await fetch(`${API_BASE_URL}/admin/visitors`)
       setVisitors(await resp.json())
       setMode("visitors")
     } finally {
@@ -35,7 +152,7 @@ export function AdminPanel() {
   const fetchLogs = async () => {
     setLoading(true)
     try {
-      const resp = await fetch("http://localhost:8000/admin/logs")
+      const resp = await fetch(`${API_BASE_URL}/admin/logs`)
       setLogs(await resp.json())
       setMode("logs")
     } finally {
@@ -46,7 +163,7 @@ export function AdminPanel() {
   const fetchDuplicates = async () => {
     setLoading(true)
     try {
-      const resp = await fetch("http://localhost:8000/admin/duplicates")
+      const resp = await fetch(`${API_BASE_URL}/admin/duplicates`)
       setDuplicates(await resp.json())
       setMode("duplicates")
     } finally {
@@ -54,219 +171,341 @@ export function AdminPanel() {
     }
   }
 
+  const handleResendQrEmail = async (visitorId: number) => {
+    setResendingVisitorId(visitorId)
+    try {
+      const response = await fetch(`${API_BASE_URL}/admin/visitors/${visitorId}/email-qr`, {
+        method: "POST",
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(data?.detail ?? "Failed to send QR email.")
+      }
+      alert("QR email sent successfully.")
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Failed to send QR email.")
+    } finally {
+      setResendingVisitorId(null)
+    }
+  }
+
   const handleMerge = async (v1Id: number, v2Id: number) => {
     if (!confirm(`Merge profile ${v2Id} into ${v1Id}?`)) return
+
     try {
-      await fetch("http://localhost:8000/admin/merge", {
+      const response = await fetch(`${API_BASE_URL}/admin/merge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ primary_visitor_id: v1Id, secondary_visitor_id: v2Id })
+        body: JSON.stringify({ primary_visitor_id: v1Id, secondary_visitor_id: v2Id }),
       })
+
+      if (!response.ok) {
+        throw new Error("Merge failed")
+      }
+
       alert("Merged successfully")
       fetchDuplicates()
-    } catch (e) {
+    } catch {
       alert("Merge failed")
     }
   }
 
-  const startCamera = useCallback(async (facingMode: "environment" | "user") => {
+  const handleQrDetected = useCallback(async (payload: string) => {
+    setStatus("pending")
+    setStatusMessage("QR detected. Validating token...")
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode },
+      const response = await fetch(`${API_BASE_URL}/qr/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: payload }),
       })
-      streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(data?.detail ?? "Unable to validate the scanned QR code.")
       }
-      setCameraActive(true)
-    } catch {
-      alert("Unable to access camera. Please allow camera permissions.")
+
+      const visitor = data as VisitorRecord
+      setSelectedVisitor(visitor)
+      setResult(null)
+      setStatus("idle")
+      setStatusMessage(`QR matched ${visitor.name}. Capture a live face to complete check-in.`)
+      setMode("face")
+      await startCamera("user")
+    } catch (error) {
+      stopCamera()
+      setStatus("denied")
+      setStatusMessage(error instanceof Error ? error.message : "Unable to validate the scanned QR code.")
+    } finally {
+      scanLockRef.current = false
     }
-  }, [])
+  }, [startCamera, stopCamera])
 
-  const stopCamera = useCallback(() => {
-    streamRef.current?.getTracks().forEach((t) => t.stop())
-    setCameraActive(false)
-  }, [])
+  useEffect(() => {
+    if (mode !== "qr" || !cameraActive || !videoReady) {
+      return
+    }
 
-  const handleQrScan = () => {
-    setMode("qr")
-    setStatus("idle")
-    setFacePhoto(null)
-    startCamera("environment")
-  }
+    const video = videoRef.current
+    const canvas = scanCanvasRef.current
+    const context = canvas?.getContext("2d", { willReadFrequently: true })
+    if (!video || !canvas || !context) {
+      return
+    }
 
-  const handleFaceCapture = () => {
-    setMode("face")
-    setStatus("idle")
-    setFacePhoto(null)
-    startCamera("user")
-  }
+    let cancelled = false
 
-  const captureForVerification = useCallback(async () => {
-    if (!videoRef.current) return
-    const canvas = document.createElement("canvas")
-    canvas.width = videoRef.current.videoWidth
-    canvas.height = videoRef.current.videoHeight
-    const ctx = canvas.getContext("2d")
-    if (ctx) {
-      ctx.drawImage(videoRef.current, 0, 0)
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.8)
-      setFacePhoto(dataUrl)
-      setStatus("pending")
+    const scanFrame = () => {
+      if (cancelled) {
+        return
+      }
 
-      // Verification logic
-      try {
-        const visitorId = prompt("Enter Visitor ID:")
-        if (!visitorId) {
-          setStatus("idle")
-          setFacePhoto(null)
+      if (
+        !scanLockRef.current &&
+        video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+        video.videoWidth > 0 &&
+        video.videoHeight > 0
+      ) {
+        canvas.width = video.videoWidth
+        canvas.height = video.videoHeight
+        context.drawImage(video, 0, 0, canvas.width, canvas.height)
+        const frame = context.getImageData(0, 0, canvas.width, canvas.height)
+        const code = jsQR(frame.data, frame.width, frame.height)
+
+        if (code?.data) {
+          scanLockRef.current = true
+          void handleQrDetected(code.data)
           return
         }
+      }
 
-        const res_photo = await fetch(dataUrl)
-        const blob = await res_photo.blob()
-        const formData = new FormData()
-        formData.append("visitor_id", visitorId)
-        formData.append("image", blob, "verify.jpg")
+      scanFrameRef.current = requestAnimationFrame(scanFrame)
+    }
 
-        const response = await fetch("http://localhost:8000/check-in", {
-          method: "POST",
-          body: formData
-        })
-        const data = await response.json()
+    scanFrameRef.current = requestAnimationFrame(scanFrame)
 
-        if (data.decision === "ALLOW") {
-          setStatus("allowed")
-        } else {
-          setStatus("denied")
-        }
-      } catch (error) {
-        console.error("Verification error:", error)
-        setStatus("denied")
+    return () => {
+      cancelled = true
+      if (scanFrameRef.current !== null) {
+        cancelAnimationFrame(scanFrameRef.current)
+        scanFrameRef.current = null
       }
     }
-    stopCamera()
-  }, [stopCamera])
+  }, [cameraActive, handleQrDetected, mode, videoReady])
 
-  const simulateQrDetected = async () => {
-    const visitorId = prompt("Enter Visitor ID:")
-    if (!visitorId) return
-
-    setStatus("pending")
-    stopCamera()
-
-    try {
-      // For QR, we still need a face verify in this flow
-      // but let's simulate a success if ID exists
-      const resp = await fetch("http://localhost:8000/admin/visitors")
-      const list = await resp.json()
-      const found = list.find((v: any) => v.id === parseInt(visitorId))
-
-      setTimeout(() => {
-        setStatus(found ? "allowed" : "denied")
-      }, 1000)
-    } catch (e) {
-      setStatus("denied")
-    }
+  const handleQrScan = async () => {
+    setMode("qr")
+    setStatus("idle")
+    setResult(null)
+    setSelectedVisitor(null)
+    setFacePhoto(null)
+    setStatusMessage("Scanning for a QR code...")
+    await startCamera("environment")
   }
+
+  const handleFaceIdentify = async () => {
+    setMode("face")
+    setStatus("idle")
+    setResult(null)
+    setSelectedVisitor(null)
+    setFacePhoto(null)
+    setStatusMessage("Align the face in view, wait for the preview to be ready, then capture.")
+    await startCamera("user")
+  }
+
+  const captureCurrentFrame = useCallback(() => {
+    const video = videoRef.current
+    if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.videoWidth === 0 || video.videoHeight === 0) {
+      throw new Error("Camera preview is not ready yet. Wait for the live image, then try again.")
+    }
+
+    const canvas = document.createElement("canvas")
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+
+    const context = canvas.getContext("2d")
+    if (!context) {
+      throw new Error("Unable to capture an image from the live preview.")
+    }
+
+    context.drawImage(video, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL("image/jpeg", 0.9)
+  }, [])
+
+  const captureForVerification = useCallback(async () => {
+    try {
+      const dataUrl = captureCurrentFrame()
+      setFacePhoto(dataUrl)
+      setResult(null)
+      setStatus("pending")
+      setStatusMessage(selectedVisitor ? `Verifying ${selectedVisitor.name} against the captured face...` : "Searching for the closest registered face match...")
+      stopCamera()
+
+      const imageResponse = await fetch(dataUrl)
+      const blob = await imageResponse.blob()
+      const formData = new FormData()
+      formData.append("image", blob, "verify.jpg")
+
+      const endpoint = selectedVisitor ? `${API_BASE_URL}/check-in` : `${API_BASE_URL}/identify`
+      if (selectedVisitor) {
+        formData.append("visitor_id", String(selectedVisitor.id))
+      }
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        body: formData,
+      })
+      const data = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        throw new Error(data?.detail ?? "Verification failed.")
+      }
+
+      const nextResult = data as VerificationResult
+      setResult(nextResult)
+      setStatus(nextResult.decision === "ALLOW" ? "allowed" : "denied")
+      setStatusMessage(nextResult.message)
+
+      if (!selectedVisitor && nextResult.visitor_id) {
+        try {
+          const visitor = await fetchVisitor(nextResult.visitor_id)
+          setSelectedVisitor(visitor)
+        } catch {
+          setSelectedVisitor(null)
+        }
+      }
+    } catch (error) {
+      setResult(null)
+      setStatus("denied")
+      setStatusMessage(error instanceof Error ? error.message : "Verification failed.")
+    }
+  }, [captureCurrentFrame, fetchVisitor, selectedVisitor, stopCamera])
 
   const handleBack = () => {
     stopCamera()
     setMode("menu")
     setStatus("idle")
     setFacePhoto(null)
+    setResult(null)
+    setSelectedVisitor(null)
+    setStatusMessage("")
   }
+
+  const isBusy = loading || status === "pending"
 
   return (
     <Card className="border-0 shadow-none">
       <CardHeader className="px-0 pt-0">
-        <div className="flex justify-between items-center">
+        <div className="flex items-center justify-between">
           <CardTitle className="text-lg font-semibold text-foreground">
-            {mode === "menu" ? "Admin Panel" : mode === "visitors" ? "Visitor List" : mode === "logs" ? "Visit Logs" : mode === "duplicates" ? "Potential Duplicates" : "Verification"}
+            {mode === "menu"
+              ? "Admin Panel"
+              : mode === "visitors"
+                ? "Visitor List"
+                : mode === "logs"
+                  ? "Visit Logs"
+                  : mode === "duplicates"
+                    ? "Potential Duplicates"
+                    : "Verification"}
           </CardTitle>
           {mode !== "menu" && (
             <Button variant="ghost" size="sm" onClick={handleBack}>Back</Button>
           )}
         </div>
       </CardHeader>
-      <CardContent className="px-0 space-y-4">
-        {/* Main Menu */}
+      <CardContent className="space-y-4 px-0">
         {mode === "menu" && (
           <div className="grid grid-cols-2 gap-3">
-            <Button variant="outline" className="h-24 flex flex-col gap-1.5" onClick={handleQrScan}>
+            <Button variant="outline" className="h-24 flex-col gap-1.5" onClick={() => void handleQrScan()}>
               <ScanLine className="h-6 w-6" />
               <span className="text-xs">Scan QR</span>
             </Button>
-            <Button variant="outline" className="h-24 flex flex-col gap-1.5" onClick={handleFaceCapture}>
+            <Button variant="outline" className="h-24 flex-col gap-1.5" onClick={() => void handleFaceIdentify()}>
               <Camera className="h-6 w-6" />
               <span className="text-xs">Face ID</span>
             </Button>
-            <Button variant="outline" className="h-24 flex flex-col gap-1.5" onClick={fetchVisitors}>
+            <Button variant="outline" className="h-24 flex-col gap-1.5" onClick={fetchVisitors} disabled={isBusy}>
               <RotateCcw className="h-6 w-6" />
               <span className="text-xs">Visitors</span>
             </Button>
-            <Button variant="outline" className="h-24 flex flex-col gap-1.5" onClick={fetchLogs}>
+            <Button variant="outline" className="h-24 flex-col gap-1.5" onClick={fetchLogs} disabled={isBusy}>
               <RotateCcw className="h-6 w-6" />
               <span className="text-xs">Logs</span>
             </Button>
-            <Button variant="outline" className="h-24 col-span-2 flex flex-col gap-1.5" onClick={fetchDuplicates}>
+            <Button variant="outline" className="col-span-2 h-24 flex-col gap-1.5" onClick={fetchDuplicates} disabled={isBusy}>
               <ShieldCheck className="h-6 w-6" />
-              <span className="text-xs">Merge Duplicates (POC)</span>
+              <span className="text-xs">Merge Duplicates</span>
             </Button>
           </div>
         )}
 
         {mode === "visitors" && (
-          <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
-            {visitors.map(v => (
-              <div key={v.id} className="p-2 border rounded-md text-sm">
-                <p className="font-bold">{v.name}</p>
-                <p className="text-xs text-muted-foreground">{v.phone} | {v.email}</p>
-                <p className="text-[10px] mt-1">ID: {v.id} | Joined: {new Date(v.created_at).toLocaleDateString()}</p>
+          <div className="max-h-96 space-y-2 overflow-y-auto pr-2">
+            {visitors.map((visitor) => (
+              <div key={visitor.id} className="rounded-md border p-2 text-sm">
+                <p className="font-bold">{visitor.name}</p>
+                <p className="text-xs text-muted-foreground">{visitor.phone ?? "No phone"} | {visitor.email ?? "No email"}</p>
+                <p className="mt-1 text-[10px]">ID: {visitor.id} | Joined: {new Date(visitor.created_at).toLocaleDateString()}</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-2 gap-1 bg-transparent"
+                  onClick={() => void handleResendQrEmail(visitor.id)}
+                  disabled={resendingVisitorId === visitor.id || !visitor.email}
+                >
+                  <Mail className="h-3.5 w-3.5" />
+                  Resend QR Email
+                </Button>
               </div>
             ))}
           </div>
         )}
 
         {mode === "logs" && (
-          <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
-            {logs.map(l => (
-              <div key={l.id} className={`p-2 border rounded-md text-sm ${l.decision === 'ALLOW' ? 'bg-emerald-50' : 'bg-red-50'}`}>
+          <div className="max-h-96 space-y-2 overflow-y-auto pr-2">
+            {logs.map((log) => (
+              <div key={log.id} className={`rounded-md border p-2 text-sm ${log.decision === "ALLOW" ? "bg-emerald-50" : "bg-red-50"}`}>
                 <div className="flex justify-between">
-                  <span className="font-bold">{l.visitor_name}</span>
-                  <span className={`font-bold ${l.decision === 'ALLOW' ? 'text-emerald-700' : 'text-red-700'}`}>{l.decision}</span>
+                  <span className="font-bold">{log.visitor_name}</span>
+                  <span className={log.decision === "ALLOW" ? "font-bold text-emerald-700" : "font-bold text-red-700"}>{log.decision}</span>
                 </div>
-                <p className="text-[10px] text-muted-foreground">{new Date(l.timestamp).toLocaleString()}</p>
-                <p className="text-[10px]">Confidence: {(l.confidence_score * 100).toFixed(1)}%</p>
+                <p className="text-[10px] text-muted-foreground">{new Date(log.timestamp).toLocaleString()}</p>
+                <p className="text-[10px]">Confidence: {(log.confidence_score * 100).toFixed(1)}%</p>
               </div>
             ))}
           </div>
         )}
 
         {mode === "duplicates" && (
-          <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
-            {duplicates.length === 0 && <p className="text-sm text-center py-4">No obvious duplicates found.</p>}
-            {duplicates.map((d, i) => (
-              <div key={i} className="p-3 border rounded-md space-y-2">
-                <div className="flex justify-between text-xs font-bold text-amber-600">
-                  <span>Potential Duplicate Found</span>
-                  <span>Reason: {d.reason}</span>
+          <div className="max-h-96 space-y-3 overflow-y-auto pr-2">
+            {duplicates.length === 0 && <p className="py-4 text-center text-sm">No duplicate suggestions found.</p>}
+            {duplicates.map((duplicate, index) => (
+              <div key={index} className="space-y-2 rounded-md border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-amber-700">
+                  <span>{duplicate.reasons.join(" | ")}</span>
+                  <span>Combined score: {(duplicate.scores.combined_score * 100).toFixed(1)}%</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="p-1 bg-muted rounded">
-                    <p className="font-bold">{d.visitor1.name}</p>
-                    <p>{d.visitor1.phone}</p>
-                    <p>ID: {d.visitor1.id}</p>
+                  <div className="rounded bg-muted p-2">
+                    <p className="font-bold">{duplicate.visitor1.name}</p>
+                    <p>{duplicate.visitor1.phone ?? "No phone"}</p>
+                    <p>{duplicate.visitor1.email ?? "No email"}</p>
+                    <p>ID: {duplicate.visitor1.id}</p>
                   </div>
-                  <div className="p-1 bg-muted rounded">
-                    <p className="font-bold">{d.visitor2.name}</p>
-                    <p>{d.visitor2.phone}</p>
-                    <p>ID: {d.visitor2.id}</p>
+                  <div className="rounded bg-muted p-2">
+                    <p className="font-bold">{duplicate.visitor2.name}</p>
+                    <p>{duplicate.visitor2.phone ?? "No phone"}</p>
+                    <p>{duplicate.visitor2.email ?? "No email"}</p>
+                    <p>ID: {duplicate.visitor2.id}</p>
                   </div>
                 </div>
-                <Button size="sm" className="w-full" onClick={() => handleMerge(d.visitor1.id, d.visitor2.id)}>
-                  Merge {d.visitor2.id} into {d.visitor1.id}
+                <div className="grid grid-cols-3 gap-2 text-[11px] text-muted-foreground">
+                  <p>Name: {(duplicate.scores.name_score * 100).toFixed(1)}%</p>
+                  <p>Phone: {(duplicate.scores.phone_score * 100).toFixed(1)}%</p>
+                  <p>Face: {duplicate.scores.face_score == null ? "N/A" : `${(duplicate.scores.face_score * 100).toFixed(1)}%`}</p>
+                </div>
+                <Button size="sm" className="w-full" onClick={() => void handleMerge(duplicate.visitor1.id, duplicate.visitor2.id)}>
+                  Merge {duplicate.visitor2.id} into {duplicate.visitor1.id}
                 </Button>
               </div>
             ))}
@@ -275,48 +514,76 @@ export function AdminPanel() {
 
         {(mode === "qr" || mode === "face") && (
           <div className="space-y-3">
+            {selectedVisitor && (
+              <div className="rounded-md border bg-muted/40 p-3 text-sm">
+                <p className="font-semibold">{selectedVisitor.name}</p>
+                <p className="text-xs text-muted-foreground">{selectedVisitor.phone ?? "No phone"}{selectedVisitor.email ? ` | ${selectedVisitor.email}` : ""}</p>
+                <p className="mt-1 text-[10px]">Visitor ID: {selectedVisitor.id}</p>
+              </div>
+            )}
+
+            {statusMessage && (
+              <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">{statusMessage}</p>
+            )}
+
             {cameraActive && (
-              <div className="relative rounded-md overflow-hidden bg-muted">
+              <div className="relative overflow-hidden rounded-md bg-muted">
                 <video
                   ref={videoRef}
                   autoPlay
                   playsInline
                   muted
-                  className={`w-full object-cover ${mode === "qr" ? "aspect-square" : "aspect-[3/4]"}`}
+                  onLoadedMetadata={() => setVideoReady(true)}
+                  className={`w-full object-cover ${mode === "qr" ? "aspect-square" : "aspect-[3/4] scale-x-[-1]"}`}
                 />
                 {mode === "qr" && (
                   <>
-                    {/* QR scan overlay */}
                     <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="w-48 h-48 border-2 border-foreground/40 rounded-lg" />
+                      <div className="h-48 w-48 rounded-lg border-2 border-foreground/40" />
                     </div>
-                    <p className="absolute bottom-3 left-0 right-0 text-center text-xs text-muted-foreground bg-background/70 py-1 mx-4 rounded">
-                      Point camera at QR code
+                    <p className="absolute bottom-3 left-0 right-0 mx-4 rounded bg-background/70 py-1 text-center text-xs text-muted-foreground">
+                      Hold the visitor QR inside the frame
                     </p>
                   </>
                 )}
                 {mode === "face" && (
                   <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-3">
-                    <Button size="sm" variant="secondary" onClick={handleBack} className="rounded-full h-10 w-10 p-0"><X className="h-4 w-4" /></Button>
-                    <Button size="sm" onClick={captureForVerification} className="rounded-full h-12 w-12 p-0"><Camera className="h-5 w-5" /></Button>
+                    <Button size="sm" variant="secondary" onClick={handleBack} className="h-10 w-10 rounded-full p-0" aria-label="Close camera">
+                      <X className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => void captureForVerification()}
+                      className="h-12 w-12 rounded-full p-0"
+                      aria-label="Capture photo"
+                      disabled={!videoReady || status === "pending"}
+                    >
+                      <Camera className="h-5 w-5" />
+                    </Button>
                   </div>
                 )}
               </div>
             )}
-            {mode === "qr" && cameraActive && (
-              <Button className="w-full" onClick={simulateQrDetected}>Simulate Scan</Button>
-            )}
+
+            <canvas ref={scanCanvasRef} className="hidden" />
+
             {facePhoto && !cameraActive && (
-              <div className="rounded-md overflow-hidden">
+              <div className="overflow-hidden rounded-md">
                 <img
-                  src={facePhoto || "/placeholder.svg"}
+                  src={facePhoto}
                   alt="Captured face for verification"
                   className="w-full aspect-[3/4] object-cover"
                 />
               </div>
             )}
+
             {!cameraActive && status !== "idle" && (
-              <ResponseDisplay status={status} onReset={handleBack} />
+              <ResponseDisplay
+                status={status}
+                result={result}
+                selectedVisitor={selectedVisitor}
+                onReset={handleBack}
+              />
             )}
           </div>
         )}
@@ -327,31 +594,38 @@ export function AdminPanel() {
 
 function ResponseDisplay({
   status,
+  result,
+  selectedVisitor,
   onReset,
 }: {
   status: VerificationStatus
+  result: VerificationResult | null
+  selectedVisitor: VisitorRecord | null
   onReset: () => void
 }) {
   return (
     <div className="space-y-3">
       {status === "pending" && (
-        <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
-          <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+        <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
           <span className="text-sm">Verifying...</span>
         </div>
       )}
 
       {status === "allowed" && (
-        <div className="flex flex-col items-center py-6 gap-2 text-emerald-600">
+        <div className="flex flex-col items-center gap-2 py-6 text-emerald-600">
           <ShieldCheck className="h-12 w-12" />
           <span className="text-lg font-semibold">Access Allowed</span>
+          {selectedVisitor && <span className="text-sm">{selectedVisitor.name}</span>}
+          {result && <span className="text-xs text-center">Confidence: {(result.confidence_score * 100).toFixed(1)}%</span>}
         </div>
       )}
 
       {status === "denied" && (
-        <div className="flex flex-col items-center py-6 gap-2 text-destructive">
+        <div className="flex flex-col items-center gap-2 py-6 text-destructive">
           <ShieldX className="h-12 w-12" />
           <span className="text-lg font-semibold">Access Denied</span>
+          {result && <span className="text-xs text-center">Confidence: {(result.confidence_score * 100).toFixed(1)}%</span>}
         </div>
       )}
 
@@ -362,3 +636,4 @@ function ResponseDisplay({
     </div>
   )
 }
+
