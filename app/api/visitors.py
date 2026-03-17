@@ -38,6 +38,7 @@ from ..security import (
     ensure_utc,
     generate_otp,
     hash_otp,
+    require_admin_api_key,
     resolve_qr_token,
     utcnow,
     validate_registration_verification_token,
@@ -290,12 +291,20 @@ async def register_visitor(
 
 
 @router.get("/visitors/{visitor_id}", response_model=VisitorResponse)
-def get_visitor(visitor_id: int, db: Session = Depends(get_db)):
+def get_visitor(
+    visitor_id: int,
+    db: Session = Depends(get_db),
+    _admin_key: str = Depends(require_admin_api_key),
+):
     return _get_visitor_by_id(visitor_id, db)
 
 
 @router.get("/visitors/{visitor_id}/qr")
-def generate_qr(visitor_id: int, db: Session = Depends(get_db)):
+def generate_qr(
+    visitor_id: int,
+    db: Session = Depends(get_db),
+    _admin_key: str = Depends(require_admin_api_key),
+):
     _get_visitor_by_id(visitor_id, db)
     qr_token, qr_png = _get_registration_qr_artifacts(visitor_id)
     return Response(content=qr_png, media_type="image/png", headers={"X-QR-Token": qr_token})
@@ -317,31 +326,37 @@ async def check_in(
     image: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    visitor = _get_visitor_by_id(visitor_id, db)
-
+    # Avoid leaking whether a visitor ID exists (IDOR/oracle attack) by always performing
+    # a face match attempt and returning a generic failure message.
     live_embedding = await _extract_embedding(image)
-    stored_embedding = json.loads(visitor.face_embedding)
+
+    visitor = db.query(Visitor).filter(Visitor.id == visitor_id).first()
+    stored_embedding = json.loads(visitor.face_embedding) if visitor else [0.0] * len(live_embedding)
+
     match, score = compare_faces(stored_embedding, live_embedding)
 
-    decision = "ALLOW" if match else "DENY"
-    message = f"Welcome {visitor.name}" if match else "Face verification failed"
+    decision = "ALLOW" if visitor and match else "DENY"
+    message = f"Welcome {visitor.name}" if visitor and match else "Face verification failed"
 
-    log = VisitLog(
-        visitor_id=visitor_id,
-        decision=decision,
-        confidence_score=score,
-        image_path=None,
-    )
-    db.add(log)
-    db.commit()
+    # Only log check-ins for known visitors to avoid leaking attempted IDs in logs.
+    if visitor:
+        log = VisitLog(
+            visitor_id=visitor_id,
+            decision=decision,
+            confidence_score=score,
+            image_path=None,
+        )
+        db.add(log)
+        db.commit()
 
-    return _build_check_response(decision, score, message, visitor if match else None)
+    return _build_check_response(decision, score, message, visitor if visitor and match else None)
 
 
 @router.post("/identify", response_model=CheckInResponse)
 async def identify_visitor(
     image: UploadFile = File(...),
     db: Session = Depends(get_db),
+    _admin_key: str = Depends(require_admin_api_key),
 ):
     live_embedding = await _extract_embedding(image)
     visitors = db.query(Visitor).all()
@@ -386,12 +401,19 @@ async def identify_visitor(
 
 
 @router.get("/admin/visitors", response_model=List[VisitorResponse])
-def get_all_visitors(db: Session = Depends(get_db)):
+def get_all_visitors(
+    db: Session = Depends(get_db),
+    _admin_key: str = Depends(require_admin_api_key),
+):
     return db.query(Visitor).order_by(Visitor.created_at.desc(), Visitor.id.desc()).all()
 
 
 @router.post("/admin/visitors/{visitor_id}/email-qr")
-async def resend_qr_email(visitor_id: int, db: Session = Depends(get_db)):
+async def resend_qr_email(
+    visitor_id: int,
+    db: Session = Depends(get_db),
+    _admin_key: str = Depends(require_admin_api_key),
+):
     visitor = _get_visitor_by_id(visitor_id, db)
     if not visitor.email:
         raise HTTPException(status_code=400, detail="Visitor does not have an email address on file.")
@@ -416,7 +438,10 @@ async def resend_qr_email(visitor_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/admin/logs")
-def get_all_logs(db: Session = Depends(get_db)):
+def get_all_logs(
+    db: Session = Depends(get_db),
+    _admin_key: str = Depends(require_admin_api_key),
+):
     logs = db.query(VisitLog).order_by(VisitLog.timestamp.desc()).all()
     result = []
     for log in logs:
@@ -435,7 +460,10 @@ def get_all_logs(db: Session = Depends(get_db)):
 
 
 @router.get("/admin/duplicates", response_model=List[DuplicateProfile])
-def find_duplicates(db: Session = Depends(get_db)):
+def find_duplicates(
+    db: Session = Depends(get_db),
+    _admin_key: str = Depends(require_admin_api_key),
+):
     visitors = db.query(Visitor).all()
     duplicates: list[DuplicateProfile] = []
 
@@ -450,7 +478,11 @@ def find_duplicates(db: Session = Depends(get_db)):
 
 
 @router.post("/admin/merge")
-def merge_visitors(request: MergeRequest, db: Session = Depends(get_db)):
+def merge_visitors(
+    request: MergeRequest,
+    db: Session = Depends(get_db),
+    _admin_key: str = Depends(require_admin_api_key),
+):
     primary = db.query(Visitor).filter(Visitor.id == request.primary_visitor_id).first()
     secondary = db.query(Visitor).filter(Visitor.id == request.secondary_visitor_id).first()
 

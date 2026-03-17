@@ -47,6 +47,13 @@ type VerificationResult = {
 }
 
 const API_BASE_URL = "http://localhost:8000"
+// Matches backend default for local development (see app/security.py).
+const ADMIN_API_KEY = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? "dev-admin-key"
+
+function buildAdminHeaders(): Record<string, string> {
+  if (!ADMIN_API_KEY) return {}
+  return { Authorization: `Bearer ${ADMIN_API_KEY}` }
+}
 
 export function AdminPanel() {
   const [mode, setMode] = useState<AdminMode>("menu")
@@ -128,7 +135,11 @@ export function AdminPanel() {
   }, [stopCamera])
 
   const fetchVisitor = useCallback(async (visitorId: number) => {
-    const response = await fetch(`${API_BASE_URL}/visitors/${visitorId}`)
+    const response = await fetch(`${API_BASE_URL}/visitors/${visitorId}`, {
+      headers: {
+        ...buildAdminHeaders(),
+      },
+    })
     const data = await response.json().catch(() => null)
 
     if (!response.ok) {
@@ -141,7 +152,11 @@ export function AdminPanel() {
   const fetchVisitors = async () => {
     setLoading(true)
     try {
-      const resp = await fetch(`${API_BASE_URL}/admin/visitors`)
+      const resp = await fetch(`${API_BASE_URL}/admin/visitors`, {
+        headers: {
+          ...buildAdminHeaders(),
+        },
+      })
       setVisitors(await resp.json())
       setMode("visitors")
     } finally {
@@ -152,7 +167,11 @@ export function AdminPanel() {
   const fetchLogs = async () => {
     setLoading(true)
     try {
-      const resp = await fetch(`${API_BASE_URL}/admin/logs`)
+      const resp = await fetch(`${API_BASE_URL}/admin/logs`, {
+        headers: {
+          ...buildAdminHeaders(),
+        },
+      })
       setLogs(await resp.json())
       setMode("logs")
     } finally {
@@ -163,7 +182,11 @@ export function AdminPanel() {
   const fetchDuplicates = async () => {
     setLoading(true)
     try {
-      const resp = await fetch(`${API_BASE_URL}/admin/duplicates`)
+      const resp = await fetch(`${API_BASE_URL}/admin/duplicates`, {
+        headers: {
+          ...buildAdminHeaders(),
+        },
+      })
       setDuplicates(await resp.json())
       setMode("duplicates")
     } finally {
@@ -176,6 +199,9 @@ export function AdminPanel() {
     try {
       const response = await fetch(`${API_BASE_URL}/admin/visitors/${visitorId}/email-qr`, {
         method: "POST",
+        headers: {
+          ...buildAdminHeaders(),
+        },
       })
       const data = await response.json().catch(() => null)
       if (!response.ok) {
@@ -195,7 +221,10 @@ export function AdminPanel() {
     try {
       const response = await fetch(`${API_BASE_URL}/admin/merge`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...buildAdminHeaders(),
+        },
         body: JSON.stringify({ primary_visitor_id: v1Id, secondary_visitor_id: v2Id }),
       })
 
@@ -353,6 +382,9 @@ export function AdminPanel() {
 
       const response = await fetch(endpoint, {
         method: "POST",
+        headers: {
+          ...buildAdminHeaders(),
+        },
         body: formData,
       })
       const data = await response.json().catch(() => null)
