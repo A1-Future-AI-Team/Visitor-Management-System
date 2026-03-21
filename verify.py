@@ -1,9 +1,10 @@
+import os
 import requests
 import sys
 import time
 
 BASE_URL = "http://127.0.0.1:8000"
-ADMIN_API_KEY = "dev-admin-key"
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "dev-admin-key")
 
 def build_verification_token(email: str) -> str:
     """Generate a valid verification token for testing."""

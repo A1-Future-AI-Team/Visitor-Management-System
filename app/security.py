@@ -146,7 +146,7 @@ def build_qr_image_bytes(payload: str) -> bytes:
     return buffer.getvalue()
 
 
-def require_admin_api_key(credentials: HTTPAuthorizationCredentials = Security(admin_auth_scheme)) -> None:
+def require_admin_api_key(credentials: HTTPAuthorizationCredentials = Security(admin_auth_scheme)) -> str:
     """FastAPI dependency to protect admin/sensitive endpoints.
 
     Uses a Bearer token (Authorization: Bearer <token>) and compares it against
@@ -160,4 +160,4 @@ def require_admin_api_key(credentials: HTTPAuthorizationCredentials = Security(a
     if not secrets.compare_digest(credentials.credentials, ADMIN_API_KEY):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    return None
+    return credentials.credentials

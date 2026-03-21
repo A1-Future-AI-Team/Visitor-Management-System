@@ -47,7 +47,7 @@ type VerificationResult = {
 }
 
 const API_BASE_URL = "http://localhost:8000"
-// Matches backend default for local development (see app/security.py).
+// Set NEXT_PUBLIC_ADMIN_API_KEY in .env.local to match the backend ADMIN_API_KEY.
 const ADMIN_API_KEY = process.env.NEXT_PUBLIC_ADMIN_API_KEY
 
 function buildAdminHeaders(): Record<string, string> {
@@ -668,4 +668,3 @@ function ResponseDisplay({
     </div>
   )
 }
-
