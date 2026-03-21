@@ -1,9 +1,15 @@
+import os
 import requests
 import sys
-
-BASE_URL = "http://localhost:8000"
-
 import time
+
+BASE_URL = "http://127.0.0.1:8000"
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "dev-admin-key")
+
+def build_verification_token(email: str) -> str:
+    """Generate a valid verification token for testing."""
+    from app.security import build_registration_verification_token
+    return build_registration_verification_token(email)
 
 def test_registration():
     print("\n--- Testing Registration ---")
@@ -11,7 +17,17 @@ def test_registration():
     files = {'image': open('person_a_1.jpg', 'rb')}
     # unique phone
     ts = int(time.time())
-    data = {'name': 'John Doe', 'phone': f'{ts}', 'email': f'john_{ts}@example.com'}
+    email = f'john_{ts}@example.com'
+    
+    # Generate a valid verification token for testing
+    verification_token = build_verification_token(email)
+    
+    data = {
+        'name': 'John Doe',
+        'phone': f'{ts}',
+        'email': email,
+        'verification_token': verification_token
+    }
     
     response = requests.post(url, data=data, files=files)
     if response.status_code == 200:
@@ -24,13 +40,14 @@ def test_registration():
 def test_qr(visitor_id):
     print("\n--- Testing QR Generation ---")
     url = f"{BASE_URL}/visitors/{visitor_id}/qr"
-    response = requests.get(url)
+    headers = {'Authorization': f'Bearer {ADMIN_API_KEY}'}
+    response = requests.get(url, headers=headers)
     if response.status_code == 200:
         print("QR Generation Successful")
         with open("visitor_qr.png", "wb") as f:
             f.write(response.content)
     else:
-        print(f"QR Generation Failed: {response.text}")
+        print(f"QR Generation Failed: {response.status_code} - {response.text}")
 
 def test_checkin_match(visitor_id):
     print("\n--- Testing Check-in (Match) ---")
@@ -69,5 +86,8 @@ if __name__ == "__main__":
         test_qr(visitor_id)
         test_checkin_match(visitor_id)
         test_checkin_mismatch(visitor_id)
+        print("\n✅ All tests passed!")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"❌ An error occurred: {e}")
+        import traceback
+        traceback.print_exc()
