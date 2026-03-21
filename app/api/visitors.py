@@ -343,6 +343,7 @@ async def check_in(
 
     decision = "ALLOW" if visitor and match else "DENY"
     message = f"Welcome {visitor.name}" if visitor and match else "Face verification failed"
+    public_score = score if decision == "ALLOW" else 0.0
 
     # Only log check-ins for known visitors to avoid leaking attempted IDs in logs.
     if visitor:
@@ -355,7 +356,12 @@ async def check_in(
         db.add(log)
         db.commit()
 
-    return _build_check_response(decision, score, message, visitor if visitor and match else None)
+    return _build_check_response(
+        decision,
+        public_score,
+        message,
+        visitor if visitor and match else None,
+    )
 
 
 @router.post("/identify", response_model=CheckInResponse)
