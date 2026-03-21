@@ -13,7 +13,7 @@ from itsdangerous import BadData, SignatureExpired, URLSafeTimedSerializer
 
 # Admin API key used for protecting admin and sensitive endpoints.
 # Set via environment variable for production. Defaults to a non-secret value for local development.
-ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "dev-admin-key")
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
 
 # FastAPI security scheme (Bearer token) used to authenticate admin requests.
 admin_auth_scheme = HTTPBearer(auto_error=False)
