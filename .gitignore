@@ -17,6 +17,7 @@ tmp/
 __pycache__/
 .venv/
 *.log
+visitor_qr.png
 
 # local model cache
 .cache/
