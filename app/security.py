@@ -12,8 +12,15 @@ import qrcode
 from itsdangerous import BadData, SignatureExpired, URLSafeTimedSerializer
 
 # Admin API key used for protecting admin and sensitive endpoints.
-# Set via environment variable for production. Defaults to "dev-admin-key" for local development only.
-ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "dev-admin-key")
+# Set via environment variable for production. Falls back to a dev key for local testing.
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
+if not ADMIN_API_KEY:
+    import warnings
+    warnings.warn(
+        "ADMIN_API_KEY is not set. Using insecure default for local development only.",
+        stacklevel=1,
+    )
+    ADMIN_API_KEY = "dev-admin-key"
 
 # FastAPI security scheme (Bearer token) used to authenticate admin requests.
 admin_auth_scheme = HTTPBearer(auto_error=False)
