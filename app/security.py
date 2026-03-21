@@ -6,8 +6,17 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from io import BytesIO
 
+from fastapi import HTTPException, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import qrcode
 from itsdangerous import BadData, SignatureExpired, URLSafeTimedSerializer
+
+# Admin API key used for protecting admin and sensitive endpoints.
+# Set via environment variable for production. Defaults to "dev-admin-key" for local development only.
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "dev-admin-key")
+
+# FastAPI security scheme (Bearer token) used to authenticate admin requests.
+admin_auth_scheme = HTTPBearer(auto_error=False)
 
 APP_SECRET_KEY = os.getenv("APP_SECRET_KEY", "dev-secret-change-me")
 OTP_TTL_MINUTES = int(os.getenv("OTP_TTL_MINUTES", "10"))
@@ -128,3 +137,20 @@ def build_qr_image_bytes(payload: str) -> bytes:
     image.save(buffer, format="PNG")
     buffer.seek(0)
     return buffer.getvalue()
+
+
+def require_admin_api_key(credentials: HTTPAuthorizationCredentials = Security(admin_auth_scheme)) -> str:
+    """FastAPI dependency to protect admin/sensitive endpoints.
+
+    Uses a Bearer token (Authorization: Bearer <token>) and compares it against
+    the ADMIN_API_KEY environment variable.
+
+    This is intentionally kept simple for this demo application.
+    """
+    if not credentials or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+
+    if not secrets.compare_digest(credentials.credentials, ADMIN_API_KEY):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    return credentials.credentials
