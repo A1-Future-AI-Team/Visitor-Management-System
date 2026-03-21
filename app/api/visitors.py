@@ -331,7 +331,13 @@ async def check_in(
     live_embedding = await _extract_embedding(image)
 
     visitor = db.query(Visitor).filter(Visitor.id == visitor_id).first()
-    stored_embedding = json.loads(visitor.face_embedding) if visitor else [0.0] * len(live_embedding)
+    stored_embedding = [0.0] * len(live_embedding)
+    if visitor:
+        try:
+            stored_embedding = json.loads(visitor.face_embedding)
+        except json.JSONDecodeError:
+            logger.error("Malformed face_embedding for visitor_id=%s", visitor_id)
+            visitor = None  # Treat as non-existent to avoid partial match
 
     match, score = compare_faces(stored_embedding, live_embedding)
 
