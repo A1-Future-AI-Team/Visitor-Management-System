@@ -48,7 +48,7 @@ type VerificationResult = {
 
 const API_BASE_URL = "http://localhost:8000"
 // Matches backend default for local development (see app/security.py).
-const ADMIN_API_KEY = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? "dev-admin-key"
+const ADMIN_API_KEY = process.env.NEXT_PUBLIC_ADMIN_API_KEY
 
 function buildAdminHeaders(): Record<string, string> {
   if (!ADMIN_API_KEY) return {}
