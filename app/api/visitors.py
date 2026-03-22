@@ -345,16 +345,16 @@ async def check_in(
     message = f"Welcome {visitor.name}" if visitor and match else "Face verification failed"
     public_score = score if decision == "ALLOW" else 0.0
 
-    # Only log check-ins for known visitors to avoid leaking attempted IDs in logs.
-    if visitor:
-        log = VisitLog(
-            visitor_id=visitor_id,
-            decision=decision,
-            confidence_score=score,
-            image_path=None,
-        )
-        db.add(log)
-        db.commit()
+    # Log check-in attempt symmetrically to avoid timing attacks.
+    # Visitor ID is masked if the visitor does not exist.
+    log = VisitLog(
+        visitor_id=visitor.id if visitor else None,
+        decision=decision,
+        confidence_score=score,
+        image_path=None,
+    )
+    db.add(log)
+    db.commit()
 
     return _build_check_response(
         decision,
