@@ -2,6 +2,28 @@
 
 This is the backend for the Visitor Management System, built with **FastAPI**. It handles visitor registration, QR code generation, and biometric verification using **DeepFace (ArcFace model)**.
 
+## Configuration
+
+Copy the example environment file and tweak as needed:
+
+```bash
+cp .env.example .env
+```
+
+At minimum, set a strong admin API key for protecting admin endpoints:
+
+```bash
+# .env
+ADMIN_API_KEY=super-secret-token
+```
+
+If you are also running the frontend UI, set the public version as well:
+
+```bash
+# .env.local (Next.js frontend)
+NEXT_PUBLIC_ADMIN_API_KEY=super-secret-token
+```
+
 ## Prerequisites
 
 -   **Python 3.9+**
@@ -73,6 +95,29 @@ curl -X 'POST' \
   -F 'image=@person_a_2.jpg;type=image/jpeg'
 ```
 *Returns*: JSON with `decision` ("ALLOW"/"DENY") and `confidence_score`.
+
+### 4. Admin Endpoints (Protected)
+The following endpoints require a valid admin API key. Provide it via `Authorization: Bearer <ADMIN_API_KEY>`.
+
+#### Get all visitors
+```bash
+curl -X 'GET' \
+  'http://localhost:8000/admin/visitors' \
+  -H 'accept: application/json' \
+  -H 'Authorization: Bearer <ADMIN_API_KEY>'
+```
+
+#### Identify a visitor (face match)
+**Endpoint**: `POST /identify`
+
+```bash
+curl -X 'POST' \
+  'http://localhost:8000/identify' \
+  -H 'accept: application/json' \
+  -H 'Authorization: Bearer <ADMIN_API_KEY>' \
+  -H 'Content-Type: multipart/form-data' \
+  -F 'image=@person_a_2.jpg;type=image/jpeg'
+```
 
 ## Automated Testing
 Run the verification script to test the full flow:
