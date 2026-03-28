@@ -141,3 +141,139 @@ async def send_registration_confirmation_email_safe(
         )
     except Exception:
         logger.exception("Failed to send registration confirmation email for visitor_id=%s", visitor_id)
+
+
+async def send_host_approval_request_email(
+    host_email: str,
+    host_name: str,
+    visitor_name: str,
+    visitor_email: str,
+    purpose: str,
+    requested_datetime: str,
+    location_name: str,
+    approve_url: str,
+    deny_url: str,
+) -> None:
+    plain_body = (
+        f"Hello {host_name},\n\n"
+        f"{visitor_name} ({visitor_email}) has requested to visit you at {location_name} "
+        f"on {requested_datetime}.\n\n"
+        f"Purpose: {purpose}\n\n"
+        f"Approve this visit:\n{approve_url}\n\n"
+        f"Decline this visit:\n{deny_url}\n\n"
+        "These links can only be used once."
+    )
+    html_body = (
+        f"<p>Hello {host_name},</p>"
+        f"<p><strong>{visitor_name}</strong> ({visitor_email}) has requested to visit you at "
+        f"<strong>{location_name}</strong> on <strong>{requested_datetime}</strong>.</p>"
+        f"<p><strong>Purpose:</strong> {purpose}</p>"
+        f"<p style='margin-top:24px;'>"
+        f"<a href='{approve_url}' style='display:inline-block;padding:12px 24px;background:#16a34a;"
+        f"color:white;text-decoration:none;border-radius:8px;font-weight:600;margin-right:12px;'>"
+        f"✓ Approve Visit</a>"
+        f"<a href='{deny_url}' style='display:inline-block;padding:12px 24px;background:#dc2626;"
+        f"color:white;text-decoration:none;border-radius:8px;font-weight:600;'>"
+        f"✗ Decline Visit</a></p>"
+        f"<p style='color:#888;font-size:13px;margin-top:16px;'>These links can only be used once.</p>"
+    )
+    message = MessageSchema(
+        recipients=[host_email],
+        subject=f"Visit Request — {visitor_name} on {requested_datetime}",
+        body=plain_body,
+        alternative_body=html_body,
+        subtype=MessageType.plain,
+        multipart_subtype=MultipartSubtypeEnum.alternative,
+    )
+    await _send_message(message)
+
+
+async def send_host_approval_request_email_safe(
+    host_email: str,
+    host_name: str,
+    visitor_name: str,
+    visitor_email: str,
+    purpose: str,
+    requested_datetime: str,
+    location_name: str,
+    approve_url: str,
+    deny_url: str,
+) -> None:
+    try:
+        await send_host_approval_request_email(
+            host_email=host_email,
+            host_name=host_name,
+            visitor_name=visitor_name,
+            visitor_email=visitor_email,
+            purpose=purpose,
+            requested_datetime=requested_datetime,
+            location_name=location_name,
+            approve_url=approve_url,
+            deny_url=deny_url,
+        )
+    except Exception:
+        logger.exception("Failed to send host approval request email to %s", host_email)
+
+
+async def send_visit_request_pending_email(
+    visitor_email: str,
+    visitor_name: str,
+    host_name: str,
+    location_name: str,
+    purpose: str,
+    requested_datetime: str,
+) -> None:
+    plain_body = (
+        f"Hello {visitor_name},\n\n"
+        f"Your visit request has been submitted and is awaiting approval.\n\n"
+        f"Host: {host_name}\n"
+        f"Location: {location_name}\n"
+        f"Date/Time: {requested_datetime}\n"
+        f"Purpose: {purpose}\n\n"
+        "You will receive another email once your host responds."
+    )
+    html_body = (
+        f"<p>Hello {visitor_name},</p>"
+        f"<p>Your visit request has been submitted and is <strong>awaiting approval</strong>.</p>"
+        f"<table style='border-collapse:collapse;margin:16px 0;'>"
+        f"<tr><td style='padding:6px 16px 6px 0;color:#888;'>Host</td>"
+        f"<td style='padding:6px 0;font-weight:600;'>{host_name}</td></tr>"
+        f"<tr><td style='padding:6px 16px 6px 0;color:#888;'>Location</td>"
+        f"<td style='padding:6px 0;font-weight:600;'>{location_name}</td></tr>"
+        f"<tr><td style='padding:6px 16px 6px 0;color:#888;'>Date/Time</td>"
+        f"<td style='padding:6px 0;font-weight:600;'>{requested_datetime}</td></tr>"
+        f"<tr><td style='padding:6px 16px 6px 0;color:#888;'>Purpose</td>"
+        f"<td style='padding:6px 0;'>{purpose}</td></tr>"
+        f"</table>"
+        f"<p>You will receive another email once your host responds.</p>"
+    )
+    message = MessageSchema(
+        recipients=[visitor_email],
+        subject="Visit request submitted — pending approval",
+        body=plain_body,
+        alternative_body=html_body,
+        subtype=MessageType.plain,
+        multipart_subtype=MultipartSubtypeEnum.alternative,
+    )
+    await _send_message(message)
+
+
+async def send_visit_request_pending_email_safe(
+    visitor_email: str,
+    visitor_name: str,
+    host_name: str,
+    location_name: str,
+    purpose: str,
+    requested_datetime: str,
+) -> None:
+    try:
+        await send_visit_request_pending_email(
+            visitor_email=visitor_email,
+            visitor_name=visitor_name,
+            host_name=host_name,
+            location_name=location_name,
+            purpose=purpose,
+            requested_datetime=requested_datetime,
+        )
+    except Exception:
+        logger.exception("Failed to send visit request pending email to %s", visitor_email)

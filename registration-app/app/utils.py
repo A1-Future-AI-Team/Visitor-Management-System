@@ -3,9 +3,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-import cv2
 import numpy as np
-from insightface.app import FaceAnalysis
 from rapidfuzz import fuzz
 
 DEFAULT_MODEL_ROOT = Path(__file__).resolve().parents[1] / ".cache" / "insightface"
@@ -25,7 +23,8 @@ class FaceRecognitionError(RuntimeError):
 
 
 @lru_cache(maxsize=1)
-def get_face_analyzer() -> FaceAnalysis:
+def get_face_analyzer():
+    from insightface.app import FaceAnalysis  # lazy — avoids 60s ONNX load on startup
     try:
         Path(FACE_MODEL_ROOT).mkdir(parents=True, exist_ok=True)
         analyzer = FaceAnalysis(
@@ -76,6 +75,7 @@ def phone_similarity(left: str | None, right: str | None) -> float:
 
 
 def _decode_image(image_bytes: bytes) -> np.ndarray:
+    import cv2  # lazy import
     if not image_bytes:
         raise ValueError("No image bytes were provided.")
 

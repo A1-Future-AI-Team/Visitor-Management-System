@@ -69,6 +69,7 @@ class OTPVerifyResponse(BaseModel):
     message: str
     status: str
     verification_token: str
+    existing_visitor_id: Optional[int] = None
 
 
 class QRResolveRequest(BaseModel):
@@ -92,3 +93,76 @@ class DuplicateProfile(BaseModel):
     visitor2: VisitorResponse
     reasons: List[str]
     scores: DuplicateScores
+
+
+# ─── Location ──────────────────────────────────────────────────────────────────
+
+class LocationBase(BaseModel):
+    name: str
+    address: Optional[str] = None
+    city: Optional[str] = None
+    timezone: str = "UTC"
+
+
+class LocationCreate(LocationBase):
+    pass
+
+
+class LocationResponse(LocationBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ─── Host ──────────────────────────────────────────────────────────────────────
+
+class HostBase(BaseModel):
+    name: str
+    email: EmailStr
+    phone: Optional[str] = None
+    department: Optional[str] = None
+    location_id: int
+
+
+class HostCreate(HostBase):
+    pass
+
+
+class HostResponse(HostBase):
+    id: int
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ─── VisitRequest ──────────────────────────────────────────────────────────────
+
+class VisitRequestCreate(BaseModel):
+    visitor_id: int
+    host_id: int
+    location_id: int
+    purpose: str
+    requested_datetime: datetime
+
+
+class VisitRequestResponse(BaseModel):
+    id: int
+    visitor_id: int
+    host_id: int
+    location_id: int
+    purpose: str
+    requested_datetime: datetime
+    slot_duration_minutes: int
+    status: str
+    host_remarks: Optional[str] = None
+    qr_token: Optional[str] = None
+    qr_expires_at: Optional[datetime] = None
+    created_at: datetime
+    responded_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

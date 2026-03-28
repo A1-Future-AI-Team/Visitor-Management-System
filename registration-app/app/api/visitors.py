@@ -231,10 +231,19 @@ async def verify_otp(request: OTPVerify, db: Session = Depends(get_db)):
     challenge.consumed_at = now
     db.commit()
 
+    # Check whether this email is already registered so the frontend can skip
+    # the face-enrollment step for returning visitors.
+    existing_visitor = (
+        db.query(Visitor)
+        .filter(func.lower(Visitor.email) == email)
+        .first()
+    )
+
     return OTPVerifyResponse(
         message="OTP verified",
         status="success",
         verification_token=build_registration_verification_token(email),
+        existing_visitor_id=existing_visitor.id if existing_visitor else None,
     )
 
 

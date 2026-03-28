@@ -7,7 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 
 from .database import Base, engine
-from .api import visitors
+from . import models  # noqa: F401 — register all models with Base before create_all
+from .api import visitors, visit_requests
 
 Base.metadata.create_all(bind=engine)
 
@@ -27,6 +28,7 @@ app.add_middleware(
 )
 
 app.include_router(visitors.router, tags=["visitors"])
+app.include_router(visit_requests.router, tags=["visit-requests"])
 
 
 @app.get("/")

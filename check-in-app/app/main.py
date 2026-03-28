@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 
 from .database import Base, engine
+from . import models  # noqa: F401 — register all models with Base before create_all
 from .api import visitors
 
 Base.metadata.create_all(bind=engine)
