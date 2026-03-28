@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import jsQR from "jsqr"
 import { toast } from "sonner"
-import { ArrowLeft, Camera, QrCode, RotateCcw, ScanLine, ShieldCheck, ShieldX, User, X } from "lucide-react"
+import { ArrowLeft, Camera, QrCode, RotateCcw, ShieldCheck, ShieldX, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
