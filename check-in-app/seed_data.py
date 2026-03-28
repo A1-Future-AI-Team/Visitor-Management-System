@@ -2,7 +2,7 @@ import json
 import random
 from sqlalchemy.orm import Session
 from app.database import SessionLocal, engine, Base
-from app.models import OTPChallenge, Visitor, VisitLog
+from app.models import Visitor, VisitLog
 from app.utils import placeholder_embedding
 
 
