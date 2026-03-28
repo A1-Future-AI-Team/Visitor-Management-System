@@ -2,17 +2,55 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
 import {
   InputOTP,
   InputOTPGroup,
   InputOTPSlot,
 } from "@/components/ui/input-otp"
-import { Camera, CheckCircle2, RotateCcw, X } from "lucide-react"
+import { Camera, Check, CheckCircle2, RotateCcw, X, ShieldCheck } from "lucide-react"
+import { toast } from "sonner"
+import { cn } from "@/lib/utils"
 
 const API_BASE_URL = "http://localhost:8000"
+
+function StepDotBar({ currentStep }: { currentStep: number }) {
+  const steps = ["PERSONAL\nINFO", "VERIFI-\nCATION", "PHOTO", "COMPLETE"]
+  return (
+    <div className="relative pt-4 pb-2">
+      {/* Background line */}
+      <div className="absolute top-[22px] left-0 right-0 h-0.5 bg-gray-200" />
+      {/* Filled line progress */}
+      <div
+        className="absolute top-[22px] left-0 h-0.5 bg-indigo-500 transition-all duration-500"
+        style={{ width: `${((currentStep - 1) / 3) * 100}%` }}
+      />
+      <div className="relative flex justify-between">
+        {steps.map((label, i) => {
+          const step = i + 1
+          const isActive = currentStep === step
+          const isDone = currentStep > step
+          return (
+            <div key={i} className="flex flex-col items-center gap-2">
+              <div
+                className={cn(
+                  "w-3 h-3 rounded-full border-2 transition-all",
+                  isDone && "bg-indigo-500 border-indigo-500",
+                  isActive && "bg-indigo-500 border-indigo-500 ring-4 ring-indigo-100",
+                  !isDone && !isActive && "bg-white border-gray-300"
+                )}
+              />
+              <div className="text-center">
+                <p className="text-[8px] uppercase font-semibold text-gray-600 leading-tight whitespace-pre-line">{`STEP ${step}:\n${label}`}</p>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 export function VisitorRegistration() {
   const [name, setName] = useState("")
@@ -28,8 +66,20 @@ export function VisitorRegistration() {
   const [cameraMessage, setCameraMessage] = useState("")
   const [sendingOtp, setSendingOtp] = useState(false)
   const [verifyingOtp, setVerifyingOtp] = useState(false)
+  const [registrationComplete, setRegistrationComplete] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+
+  // Calculate current step
+  const currentStep = registrationComplete
+    ? 4
+    : photo
+      ? 4
+      : otpVerified
+        ? 3
+        : otpSent || email.trim()
+          ? 2
+          : 1
 
   const resetOtpState = useCallback(() => {
     setOtp("")
@@ -85,13 +135,13 @@ export function VisitorRegistration() {
       streamRef.current = stream
       setCameraOpen(true)
     } catch {
-      alert("Unable to access camera. Please allow camera permissions.")
+      toast.error("Unable to access camera. Please allow camera permissions.")
     }
   }, [stopCamera])
 
   const capturePhoto = useCallback(() => {
     if (!videoRef.current || videoRef.current.videoWidth === 0 || videoRef.current.videoHeight === 0) {
-      alert("Camera preview is not ready yet. Wait for the live image, then capture.")
+      toast.error("Camera preview is not ready yet. Wait for the live image, then capture.")
       return
     }
 
@@ -100,7 +150,7 @@ export function VisitorRegistration() {
     canvas.height = videoRef.current.videoHeight
     const ctx = canvas.getContext("2d")
     if (!ctx) {
-      alert("Unable to capture a photo from the live preview.")
+      toast.error("Unable to capture a photo from the live preview.")
       return
     }
 
@@ -129,10 +179,10 @@ export function VisitorRegistration() {
       }
 
       setOtpSent(true)
-      alert("Verification code sent to your email inbox.")
+      toast.success("Verification code sent to your email inbox.")
     } catch (error) {
       console.error("Error sending OTP:", error)
-      alert(error instanceof Error ? error.message : "Failed to send OTP. Is the backend running?")
+      toast.error(error instanceof Error ? error.message : "Failed to send OTP. Is the backend running?")
     } finally {
       setSendingOtp(false)
     }
@@ -157,10 +207,10 @@ export function VisitorRegistration() {
 
       setOtpVerified(true)
       setVerificationToken(data.verification_token)
-      alert("Email verified successfully.")
+      toast.success("Email verified successfully.")
     } catch (error) {
       console.error("Error verifying OTP:", error)
-      alert(error instanceof Error ? error.message : "OTP verification failed.")
+      toast.error(error instanceof Error ? error.message : "OTP verification failed.")
       setOtpVerified(false)
       setVerificationToken(null)
     } finally {
@@ -191,42 +241,91 @@ export function VisitorRegistration() {
 
       const data = await regResponse.json().catch(() => null)
       if (regResponse.ok) {
-        alert(`Registration successful. Visitor ID: ${data.id}. Check your email for the QR code.`)
-        setName("")
-        setEmail("")
-        setPhone("")
-        setPhoto(null)
-        setCameraMessage("")
-        resetOtpState()
+        setRegistrationComplete(true)
+        toast.success(`Registration successful! Visitor ID: ${data.id}`)
       } else {
-        alert(`Registration failed: ${data?.detail ?? "Unknown error"}`)
+        toast.error(`Registration failed: ${data?.detail ?? "Unknown error"}`)
       }
     } catch (error) {
       console.error("Error during registration:", error)
-      alert("An error occurred during registration. Check the console for details.")
+      toast.error("An error occurred during registration. Check the console for details.")
     }
   }
 
+  const handleRegisterAnother = () => {
+    setName("")
+    setEmail("")
+    setPhone("")
+    setPhoto(null)
+    setCameraMessage("")
+    resetOtpState()
+    setRegistrationComplete(false)
+  }
+
+  // Success state
+  if (registrationComplete) {
+    return (
+      <div className="p-[1.5px] rounded-3xl bg-gradient-to-br from-violet-400/70 via-indigo-300/50 to-purple-400/70 shadow-2xl shadow-indigo-200/50">
+        <div className="rounded-3xl bg-white/80 backdrop-blur-xl p-8">
+          <div className="flex flex-col items-center text-center space-y-4">
+            <div className="animate-check-bounce">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+                <CheckCircle2 className="h-8 w-8 text-green-600" />
+              </div>
+            </div>
+            <div className="space-y-1.5 animate-fade-in-up">
+              <h2 className="text-xl font-semibold tracking-tight text-gray-900">
+                Registration Complete
+              </h2>
+              <p className="text-sm text-gray-500 max-w-xs">
+                Your visitor pass has been created. Check your email for the QR code to present at entry.
+              </p>
+            </div>
+            <button
+              className="mt-2 animate-fade-in-up h-10 px-6 rounded-xl border border-gray-200 bg-white/50 hover:bg-white/80 text-gray-700 text-sm font-medium transition-colors"
+              onClick={handleRegisterAnother}
+            >
+              Register Another Visitor
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <Card className="border-0 shadow-none">
-      <CardHeader className="px-0 pt-0">
-        <CardTitle className="text-lg font-semibold text-foreground">
-          Visitor Registration
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-5 px-0">
+    <div className="p-[1.5px] rounded-3xl bg-gradient-to-br from-violet-400/70 via-indigo-300/50 to-purple-400/70 shadow-2xl shadow-indigo-200/50">
+      <div className="rounded-3xl bg-white/80 backdrop-blur-xl p-8 space-y-5">
+
+        {/* Shield icon */}
+        <div className="flex justify-center">
+          <ShieldCheck className="h-10 w-10 text-indigo-600" />
+        </div>
+
+        {/* Title */}
+        <div className="text-center space-y-1">
+          <h1 className="text-2xl font-bold text-gray-900">Premium Visitor Registration</h1>
+          <p className="text-sm text-gray-500">Complete the steps below to register your visit.</p>
+        </div>
+
+        {/* Step dots */}
+        <StepDotBar currentStep={currentStep} />
+
+        {/* Name */}
         <div className="space-y-2">
-          <Label htmlFor="visitor-name">Full Name</Label>
+          <Label htmlFor="visitor-name" className="text-sm font-medium text-gray-700">Full Name</Label>
           <Input
             id="visitor-name"
             placeholder="Enter your name"
             value={name}
             onChange={(event) => setName(event.target.value)}
+            className="h-11 bg-white/70 border-gray-300 rounded-xl"
           />
         </div>
 
+        {/* Email + OTP button */}
         <div className="space-y-2">
-          <Label htmlFor="visitor-email">Email Address</Label>
+          <Label htmlFor="visitor-email" className="text-sm font-medium text-gray-700">Email Address</Label>
           <div className="flex gap-2">
             <Input
               id="visitor-email"
@@ -237,42 +336,48 @@ export function VisitorRegistration() {
                 setEmail(event.target.value)
                 resetOtpState()
               }}
-              className="flex-1"
+              className="flex-1 h-11 bg-white/70 border-gray-300 rounded-xl"
             />
-            <Button
+            <button
               type="button"
-              variant="outline"
-              size="sm"
-              className="h-10 shrink-0 bg-transparent px-4"
+              className="h-11 shrink-0 px-4 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={handleSendOtp}
               disabled={!email.trim() || sendingOtp}
             >
-              {otpSent ? "Resend" : "Send OTP"}
-            </Button>
+              {sendingOtp ? "Sending..." : otpSent ? "Resend ✦" : "Send OTP ✦"}
+            </button>
           </div>
         </div>
 
+        {/* Phone */}
         <div className="space-y-2">
-          <Label htmlFor="visitor-phone">Mobile Number (Optional)</Label>
+          <Label htmlFor="visitor-phone" className="text-sm font-medium text-gray-700">Mobile Number (Optional)</Label>
           <Input
             id="visitor-phone"
             type="tel"
             placeholder="Enter mobile number"
             value={phone}
             onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 15))}
+            className="h-11 bg-white/70 border-gray-300 rounded-xl"
           />
-          <p className="text-xs text-muted-foreground">Stored for contact only. Email is the verified identifier in this POC.</p>
+          <p className="text-xs text-gray-500">
+            Stored for contact only. Email is the verified identifier in this POC.
+          </p>
         </div>
 
+        {/* OTP Section */}
         {otpSent && (
-          <div className="space-y-2">
+          <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-4 space-y-4 animate-fade-in-up">
             <div className="flex items-center justify-between">
-              <Label>Enter Email OTP</Label>
+              <Label className="text-sm font-medium text-gray-700">Enter Email OTP</Label>
               {otpVerified && (
-                <span className="flex items-center gap-1 text-xs text-emerald-600">
-                  <CheckCircle2 className="h-3.5 w-3.5" />
+                <Badge
+                  variant="secondary"
+                  className="bg-green-50 text-green-700 border-green-200 gap-1"
+                >
+                  <Check className="h-3 w-3" />
                   Verified
-                </span>
+                </Badge>
               )}
             </div>
             <div className="flex items-center gap-3">
@@ -286,35 +391,43 @@ export function VisitorRegistration() {
                   <InputOTPSlot index={5} />
                 </InputOTPGroup>
               </InputOTP>
-              <Button type="button" variant="secondary" onClick={handleVerifyOtp} disabled={otp.length !== 6 || otpVerified || verifyingOtp}>
-                Verify
-              </Button>
+              <button
+                type="button"
+                onClick={handleVerifyOtp}
+                disabled={otp.length !== 6 || otpVerified || verifyingOtp}
+                className="h-10 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {verifyingOtp ? "Verifying..." : "Verify"}
+              </button>
             </div>
           </div>
         )}
 
+        {/* Photo Section */}
         <div className="space-y-2">
-          <Label>Photo</Label>
+          <Label className="text-sm font-medium text-gray-700">Photo</Label>
+
           {!cameraOpen && !photo && (
-            <Button
+            <button
               type="button"
-              variant="outline"
-              className="h-24 w-full flex-col gap-2 border-dashed bg-transparent"
               onClick={() => void openCamera()}
+              className="w-full h-32 rounded-xl bg-gray-800/70 backdrop-blur flex flex-col items-center justify-center gap-2 text-white hover:bg-gray-800/80 transition-colors border-0"
             >
-              <Camera className="h-6 w-6 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">
-                Tap to open live camera preview
-              </span>
-            </Button>
+              <div className="rounded-full bg-white/20 p-3">
+                <Camera className="h-6 w-6 text-white" />
+              </div>
+              <span className="text-sm text-white">Tap to open camera</span>
+            </button>
           )}
 
           {cameraOpen && (
-            <div className="space-y-2">
+            <div className="space-y-2 animate-scale-in">
               {cameraMessage && (
-                <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">{cameraMessage}</p>
+                <p className="rounded-xl bg-white/70 border border-gray-200 px-3 py-2 text-sm text-gray-700">
+                  {cameraMessage}
+                </p>
               )}
-              <div className="relative overflow-hidden rounded-md bg-muted">
+              <div className="relative overflow-hidden rounded-xl bg-gray-900">
                 <video
                   ref={videoRef}
                   autoPlay
@@ -326,58 +439,61 @@ export function VisitorRegistration() {
                   }}
                   className="w-full aspect-[4/3] object-cover scale-x-[-1]"
                 />
-                <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-3">
-                  <Button
-                    size="sm"
-                    variant="secondary"
+                {/* Face oval guide overlay */}
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="w-44 h-56 rounded-full border-2 border-white/40 border-dashed" />
+                </div>
+                {/* Bottom control bar */}
+                <div className="absolute bottom-0 left-0 right-0 flex justify-center gap-4 pb-4 pt-8 bg-gradient-to-t from-black/60 to-transparent">
+                  <button
                     onClick={stopCamera}
-                    className="h-10 w-10 rounded-full p-0"
+                    className="h-10 w-10 rounded-full bg-white/20 backdrop-blur-sm text-white hover:bg-white/30 flex items-center justify-center transition-colors"
                     aria-label="Close camera"
                   >
                     <X className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    size="sm"
+                  </button>
+                  <button
                     onClick={capturePhoto}
-                    className="h-12 w-12 rounded-full p-0"
+                    className="h-14 w-14 rounded-full bg-white text-black hover:bg-white/90 shadow-lg flex items-center justify-center transition-colors disabled:opacity-50"
                     aria-label="Capture photo"
                     disabled={!videoReady}
                   >
-                    <Camera className="h-5 w-5" />
-                  </Button>
+                    <Camera className="h-6 w-6" />
+                  </button>
+                  <div className="h-10 w-10" />
                 </div>
               </div>
             </div>
           )}
 
           {photo && (
-            <div className="relative overflow-hidden rounded-md">
+            <div className="relative overflow-hidden rounded-xl animate-scale-in">
               <img
                 src={photo}
                 alt="Captured visitor photo"
                 className="w-full aspect-[4/3] object-cover"
               />
-              <Button
-                size="sm"
-                variant="secondary"
-                className="absolute bottom-2 right-2 gap-1"
+              <button
+                className="absolute bottom-3 right-3 flex items-center gap-1.5 px-3 h-8 rounded-lg bg-white/80 backdrop-blur-sm hover:bg-white/90 shadow-sm text-sm text-gray-700 transition-colors"
                 onClick={() => void openCamera()}
               >
                 <RotateCcw className="h-3 w-3" />
                 Retake
-              </Button>
+              </button>
             </div>
           )}
         </div>
 
-        <Button
-          className="w-full"
+        {/* Submit */}
+        <button
+          className="w-full h-12 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-base transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={handleSubmit}
           disabled={!name.trim() || !email.trim() || !otpVerified || !verificationToken || !photo}
         >
-          Register
-        </Button>
-      </CardContent>
-    </Card>
+          Complete Registration
+        </button>
+
+      </div>
+    </div>
   )
 }

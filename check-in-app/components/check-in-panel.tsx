@@ -2,9 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import jsQR from "jsqr"
+import { toast } from "sonner"
+import { ArrowLeft, Camera, QrCode, RotateCcw, ScanLine, ShieldCheck, ShieldX, User, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Camera, RotateCcw, ScanLine, ShieldCheck, ShieldX, X } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Separator } from "@/components/ui/separator"
+import { cn } from "@/lib/utils"
 
 type VerificationStatus = "idle" | "pending" | "allowed" | "denied"
 type CheckInMode = "menu" | "qr" | "face"
@@ -31,6 +35,16 @@ const ADMIN_API_KEY = process.env.NEXT_PUBLIC_ADMIN_API_KEY
 function buildAdminHeaders(): Record<string, string> {
   if (!ADMIN_API_KEY) return {}
   return { Authorization: `Bearer ${ADMIN_API_KEY}` }
+}
+
+function getInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((n) => n[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase()
 }
 
 export function CheckInPanel() {
@@ -99,6 +113,7 @@ export function CheckInPanel() {
     } catch {
       setStatus("denied")
       setStatusMessage("Unable to access camera. Please allow camera permissions.")
+      toast.error("Unable to access camera. Please allow camera permissions.")
     }
   }, [stopCamera])
 
@@ -136,11 +151,14 @@ export function CheckInPanel() {
       setStatus("idle")
       setStatusMessage(`QR matched ${visitor.name}. Capture a live face to complete check-in.`)
       setMode("face")
+      toast.success(`QR matched: ${visitor.name}`)
       await startCamera("user")
     } catch (error) {
       stopCamera()
       setStatus("denied")
-      setStatusMessage(error instanceof Error ? error.message : "Unable to validate the scanned QR code.")
+      const msg = error instanceof Error ? error.message : "Unable to validate the scanned QR code."
+      setStatusMessage(msg)
+      toast.error(msg)
     } finally {
       scanLockRef.current = false
     }
@@ -263,6 +281,12 @@ export function CheckInPanel() {
       setStatus(nextResult.decision === "ALLOW" ? "allowed" : "denied")
       setStatusMessage(nextResult.message)
 
+      if (nextResult.decision === "ALLOW") {
+        toast.success("Access granted")
+      } else {
+        toast.error("Access denied")
+      }
+
       if (!selectedVisitor && nextResult.visitor_id) {
         try {
           const visitor = await fetchVisitor(nextResult.visitor_id)
@@ -274,7 +298,9 @@ export function CheckInPanel() {
     } catch (error) {
       setResult(null)
       setStatus("denied")
-      setStatusMessage(error instanceof Error ? error.message : "Verification failed.")
+      const msg = error instanceof Error ? error.message : "Verification failed."
+      setStatusMessage(msg)
+      toast.error(msg)
     }
   }, [captureCurrentFrame, fetchVisitor, selectedVisitor, stopCamera])
 
@@ -289,110 +315,208 @@ export function CheckInPanel() {
   }
 
   return (
-    <Card className="border-0 shadow-none">
-      <CardHeader className="px-0 pt-0">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-lg font-semibold text-foreground">
-            {mode === "menu" ? "Check-In / Identification" : "Verification"}
-          </CardTitle>
-          {mode !== "menu" && (
-            <Button variant="ghost" size="sm" onClick={handleBack}>Back</Button>
-          )}
+    <div className="space-y-5">
+      {/* Header bar with back button */}
+      {mode !== "menu" && (
+        <div className="flex items-center gap-3 animate-fade-in-up">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleBack}
+            className="h-9 gap-1.5 rounded-lg px-3 text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Button>
+          <Separator orientation="vertical" className="h-5" />
+          <span className="text-sm font-medium text-foreground">
+            {mode === "qr" ? "QR Scan" : "Face Verification"}
+          </span>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4 px-0">
-        {mode === "menu" && (
-          <div className="grid grid-cols-2 gap-3">
-            <Button variant="outline" className="h-24 flex-col gap-1.5" onClick={() => void handleQrScan()}>
-              <ScanLine className="h-6 w-6" />
-              <span className="text-xs">Scan Check-in QR</span>
-            </Button>
-            <Button variant="outline" className="h-24 flex-col gap-1.5" onClick={() => void handleFaceIdentify()}>
-              <Camera className="h-6 w-6" />
-              <span className="text-xs">Identify by Face</span>
-            </Button>
-          </div>
-        )}
+      )}
 
-        {(mode === "qr" || mode === "face") && (
-          <div className="space-y-3">
-            {selectedVisitor && (
-              <div className="rounded-md border bg-muted/40 p-3 text-sm">
-                <p className="font-semibold">{selectedVisitor.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {selectedVisitor.phone ?? "No phone"}{selectedVisitor.email ? ` | ${selectedVisitor.email}` : ""}
-                </p>
-                <p className="mt-1 text-[10px]">Visitor ID: {selectedVisitor.id}</p>
+      {/* Mode selector menu */}
+      {mode === "menu" && (
+        <div className="grid grid-cols-2 gap-5 animate-fade-in-up">
+          {/* QR Card */}
+          <div
+            className="p-[1.5px] rounded-3xl bg-gradient-to-br from-violet-400/80 via-indigo-300/60 to-purple-400/80 cursor-pointer"
+            onClick={() => void handleQrScan()}
+          >
+            <div className="rounded-3xl bg-white/80 backdrop-blur-xl p-8 flex flex-col items-center text-center h-full min-h-[260px] justify-center gap-4 hover:bg-white/90 transition-colors">
+              <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-white shadow-xl">
+                <QrCode className="h-10 w-10 text-gray-800" />
               </div>
-            )}
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Scan QR Code</h3>
+                <p className="text-sm text-gray-500 mt-1">Scan visitor&apos;s gate pass</p>
+              </div>
+            </div>
+          </div>
 
-            {statusMessage && (
-              <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">{statusMessage}</p>
-            )}
+          {/* Face Card */}
+          <div
+            className="p-[1.5px] rounded-3xl bg-gradient-to-br from-violet-400/80 via-indigo-300/60 to-purple-400/80 cursor-pointer"
+            onClick={() => void handleFaceIdentify()}
+          >
+            <div className="rounded-3xl bg-white/80 backdrop-blur-xl p-8 flex flex-col items-center text-center h-full min-h-[260px] justify-center gap-4 hover:bg-white/90 transition-colors">
+              <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+                {/* Corner brackets */}
+                <path d="M8,20 L8,8 L20,8" stroke="#6366f1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M60,8 L72,8 L72,20" stroke="#6366f1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M8,60 L8,72 L20,72" stroke="#6366f1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M60,72 L72,72 L72,60" stroke="#6366f1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                {/* Face outline */}
+                <ellipse cx="40" cy="35" rx="18" ry="22" stroke="#1e1b4b" strokeWidth="1.8"/>
+                {/* Eyes */}
+                <circle cx="33" cy="30" r="2.5" fill="#1e1b4b"/>
+                <circle cx="47" cy="30" r="2.5" fill="#1e1b4b"/>
+                {/* Nose */}
+                <path d="M40,35 L38,42 L42,42" stroke="#1e1b4b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                {/* Scan line */}
+                <line x1="4" y1="40" x2="76" y2="40" stroke="#6366f1" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Identify by Face</h3>
+                <p className="text-sm text-gray-500 mt-1">Camera-based recognition</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
-            {cameraActive && (
-              <div className="relative overflow-hidden rounded-md bg-muted">
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  onLoadedMetadata={() => setVideoReady(true)}
-                  className={`w-full object-cover ${mode === "qr" ? "aspect-square" : "aspect-[3/4] scale-x-[-1]"}`}
-                />
-                {mode === "qr" && (
-                  <>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="h-48 w-48 rounded-lg border-2 border-foreground/40" />
+      {/* Active mode content */}
+      {(mode === "qr" || mode === "face") && (
+        <div className="space-y-4">
+          {/* Visitor info card */}
+          {selectedVisitor && (
+            <div className="flex items-center gap-3 rounded-xl border border-border/50 bg-card p-4 shadow-sm animate-slide-in-right">
+              <Avatar className="h-10 w-10 border border-border/50">
+                <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
+                  {getInitials(selectedVisitor.name)}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-foreground">{selectedVisitor.name}</p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {selectedVisitor.email ?? selectedVisitor.phone ?? "No contact info"}
+                </p>
+              </div>
+              <Badge variant="secondary" className="shrink-0 text-[10px] font-medium">
+                ID {selectedVisitor.id}
+              </Badge>
+            </div>
+          )}
+
+          {/* Status message bar */}
+          {statusMessage && (
+            <div className="rounded-lg bg-white/70 border border-gray-200 px-4 py-2.5 animate-fade-in-up">
+              <p className="text-xs text-gray-700 leading-relaxed">{statusMessage}</p>
+            </div>
+          )}
+
+          {/* Camera viewport */}
+          {cameraActive && (
+            <div className={cn(mode === "qr" ? "max-w-xs mx-auto" : "max-w-md mx-auto")}>
+            <div className={cn(
+              "relative overflow-hidden rounded-xl bg-black shadow-lg animate-scale-in",
+              mode === "qr" ? "aspect-square" : "aspect-[3/4]"
+            )}>
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                onLoadedMetadata={() => setVideoReady(true)}
+                className={cn(
+                  "h-full w-full object-cover",
+                  mode === "face" && "scale-x-[-1]"
+                )}
+              />
+
+              {/* QR mode overlay: corner brackets */}
+              {mode === "qr" && (
+                <>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="relative h-44 w-44">
+                      {/* Top-left corner */}
+                      <div className="absolute left-0 top-0 h-8 w-8 border-l-2 border-t-2 border-white/80 rounded-tl" />
+                      {/* Top-right corner */}
+                      <div className="absolute right-0 top-0 h-8 w-8 border-r-2 border-t-2 border-white/80 rounded-tr" />
+                      {/* Bottom-left corner */}
+                      <div className="absolute bottom-0 left-0 h-8 w-8 border-b-2 border-l-2 border-white/80 rounded-bl" />
+                      {/* Bottom-right corner */}
+                      <div className="absolute bottom-0 right-0 h-8 w-8 border-b-2 border-r-2 border-white/80 rounded-br" />
                     </div>
-                    <p className="absolute bottom-3 left-0 right-0 mx-4 rounded bg-background/70 py-1 text-center text-xs text-muted-foreground">
+                  </div>
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-4 pb-4 pt-10">
+                    <p className="text-center text-xs font-medium text-white">
                       Hold the visitor QR inside the frame
                     </p>
-                  </>
-                )}
-                {mode === "face" && (
-                  <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-3">
-                    <Button size="sm" variant="secondary" onClick={handleBack} className="h-10 w-10 rounded-full p-0" aria-label="Close camera">
-                      <X className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => void captureForVerification()}
-                      className="h-12 w-12 rounded-full p-0"
-                      aria-label="Capture photo"
-                      disabled={!videoReady || status === "pending"}
-                    >
-                      <Camera className="h-5 w-5" />
-                    </Button>
                   </div>
-                )}
-              </div>
-            )}
+                </>
+              )}
 
-            <canvas ref={scanCanvasRef} className="hidden" />
+              {/* Face mode overlay: oval guide + controls */}
+              {mode === "face" && (
+                <>
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="h-48 w-36 rounded-full border-2 border-white/30" />
+                  </div>
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-4 pb-5 pt-12">
+                    <div className="flex items-center justify-center gap-5">
+                      <button
+                        onClick={handleBack}
+                        className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-sm transition-colors hover:bg-white/30"
+                        aria-label="Close camera"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => void captureForVerification()}
+                        className={cn(
+                          "flex h-14 w-14 items-center justify-center rounded-full bg-white text-black shadow-lg transition-all hover:scale-105 active:scale-95",
+                          (!videoReady || status === "pending") && "opacity-40 pointer-events-none"
+                        )}
+                        aria-label="Capture photo"
+                        disabled={!videoReady || status === "pending"}
+                      >
+                        <Camera className="h-6 w-6" />
+                      </button>
+                      <div className="h-10 w-10" /> {/* Spacer for centering */}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+            </div>
+          )}
 
-            {facePhoto && !cameraActive && (
-              <div className="overflow-hidden rounded-md">
-                <img
-                  src={facePhoto}
-                  alt="Captured face for verification"
-                  className="w-full aspect-[3/4] object-cover"
-                />
-              </div>
-            )}
+          <canvas ref={scanCanvasRef} className="hidden" />
 
-            {!cameraActive && status !== "idle" && (
-              <ResponseDisplay
-                status={status}
-                result={result}
-                selectedVisitor={selectedVisitor}
-                onReset={handleBack}
+          {/* Captured face photo */}
+          {facePhoto && !cameraActive && (
+            <div className="overflow-hidden rounded-xl shadow-sm animate-scale-in">
+              <img
+                src={facePhoto}
+                alt="Captured face for verification"
+                className="w-full aspect-[3/4] object-cover"
               />
-            )}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+            </div>
+          )}
+
+          {/* Result display */}
+          {!cameraActive && status !== "idle" && (
+            <ResponseDisplay
+              status={status}
+              result={result}
+              selectedVisitor={selectedVisitor}
+              onReset={handleBack}
+            />
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -408,33 +532,55 @@ function ResponseDisplay({
   onReset: () => void
 }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-4 animate-fade-in-up">
+      {/* Pending state */}
       {status === "pending" && (
-        <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-          <span className="text-sm">Verifying...</span>
+        <div className="flex flex-col items-center gap-4 rounded-xl border border-border/50 bg-card p-8 shadow-sm">
+          <div className="h-10 w-10 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          <p className="text-sm font-medium text-muted-foreground">Verifying identity...</p>
         </div>
       )}
 
+      {/* Access Granted */}
       {status === "allowed" && (
-        <div className="flex flex-col items-center gap-2 py-6 text-emerald-600">
-          <ShieldCheck className="h-12 w-12" />
-          <span className="text-lg font-semibold">Access Allowed</span>
-          {selectedVisitor && <span className="text-sm">{selectedVisitor.name}</span>}
-          {result && <span className="text-xs text-center">Confidence: {(result.confidence_score * 100).toFixed(1)}%</span>}
+        <div className="rounded-xl border border-success/30 bg-success/5 p-6 text-center">
+          <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-success/10">
+            <ShieldCheck className="h-9 w-9 text-success animate-check-bounce" />
+          </div>
+          <h3 className="text-lg font-bold text-success">Access Granted</h3>
+          {selectedVisitor && (
+            <p className="mt-1 text-sm text-foreground">{selectedVisitor.name}</p>
+          )}
+          {result && (
+            <Badge variant="secondary" className="mt-3 text-xs">
+              Confidence: {(result.confidence_score * 100).toFixed(1)}%
+            </Badge>
+          )}
         </div>
       )}
 
+      {/* Access Denied */}
       {status === "denied" && (
-        <div className="flex flex-col items-center gap-2 py-6 text-destructive">
-          <ShieldX className="h-12 w-12" />
-          <span className="text-lg font-semibold">Access Denied</span>
-          {result && <span className="text-xs text-center">Confidence: {(result.confidence_score * 100).toFixed(1)}%</span>}
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center">
+          <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10">
+            <ShieldX className="h-9 w-9 text-destructive" />
+          </div>
+          <h3 className="text-lg font-bold text-destructive">Access Denied</h3>
+          {result && (
+            <Badge variant="secondary" className="mt-3 text-xs">
+              Confidence: {(result.confidence_score * 100).toFixed(1)}%
+            </Badge>
+          )}
         </div>
       )}
 
-      <Button variant="outline" className="w-full gap-1 bg-transparent" onClick={onReset}>
-        <RotateCcw className="h-3 w-3" />
+      {/* Reset button */}
+      <Button
+        variant="outline"
+        className="w-full gap-2 rounded-xl border-border/50 bg-card shadow-sm hover:shadow-md transition-all duration-200"
+        onClick={onReset}
+      >
+        <RotateCcw className="h-3.5 w-3.5" />
         Back to Menu
       </Button>
     </div>

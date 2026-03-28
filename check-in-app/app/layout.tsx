@@ -1,11 +1,12 @@
 import React from "react"
 import type { Metadata } from 'next'
+import { Toaster } from "@/components/ui/sonner"
 
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Gate Pass System',
-  description: 'Visitor registration and admin verification system',
+  title: 'Security Check-in',
+  description: 'Visitor identity verification and check-in system',
 }
 
 export const viewport = {
@@ -22,7 +23,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        {children}
+        <Toaster position="top-center" richColors />
+      </body>
     </html>
   )
 }
